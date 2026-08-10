@@ -1,0 +1,84 @@
+//
+//  Shared setup for the rules tests.
+//
+//  Every test runs against the Firestore emulator with the real firestore.rules loaded, so
+//  these are genuine rule evaluations — not a model of them. `npm test` starts and stops the
+//  emulator around the run via `firebase emulators:exec`.
+//
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+/// Must match .firebaserc's default. The `demo-` prefix is what tells the Firebase SDKs never
+/// to reach for real credentials, so a misconfigured test can't touch production.
+export const PROJECT_ID = 'demo-eventsupporttracker';
+
+export async function makeTestEnv() {
+  return initializeTestEnvironment({
+    projectId: PROJECT_ID,
+    firestore: {
+      rules: readFileSync(join(here, '..', 'firestore.rules'), 'utf8'),
+      host: '127.0.0.1',
+      port: 8080,
+    },
+  });
+}
+
+/// Writes fixture data with the rules switched off. Seeding through the rules would mean the
+/// setup is doing half the assertion, and a rule change would break tests for the wrong reason.
+export async function seed(testEnv, fn) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await fn(context.firestore());
+  });
+}
+
+// ─── Document shapes ─────────────────────────────────────────────────────────
+// These mirror the DTOs the apps actually write. Keep them in step with
+// UserDTO / EventDTO / AccessDTO on iOS (and their Android equivalents).
+
+export function userDoc(overrides = {}) {
+  return {
+    name: 'Test User',
+    email: 'test@example.com',
+    phone: '',
+    username: 'testuser',
+    isGuest: false,
+    isProUser: false,
+    profileVisible: false,
+    ...overrides,
+  };
+}
+
+export function eventDoc(ownerUserId, overrides = {}) {
+  return {
+    name: 'Test Event',
+    dateTime: new Date('2026-06-01T08:00:00Z'),
+    location: 'Sunderland',
+    ownerUserId,
+    category: 'running',
+    ...overrides,
+  };
+}
+
+/// `id` must equal the uid — the collection-group rule at the bottom of firestore.rules
+/// filters on `resource.data.id`, because a list query can't see the path wildcard.
+export function accessDoc(uid, role, overrides = {}) {
+  return {
+    id: uid,
+    username: `user-${uid}`,
+    role,
+    ...overrides,
+  };
+}
+
+export function checkpointDoc(overrides = {}) {
+  return {
+    stopName: 'CP 1',
+    stopNumber: 1,
+    createdBy: 'someone',
+    ...overrides,
+  };
+}

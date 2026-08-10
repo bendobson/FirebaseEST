@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "demo-eventsupporttracker",
+    "prod": "eventtracker-a150e"
+  }
+}

@@ -1,0 +1,170 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────────────────────────────────────────
+    // Helper Functions
+    // ───────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasUserDoc() {
+      return userDoc().data != null;
+    }
+
+    function isProUser() {
+      return hasUserDoc() && userDoc().data.isProUser == true;
+    }
+
+    function userEventCount() {
+      return hasUserDoc() && ("eventCount" in userDoc().data)
+        ? userDoc().data.eventCount
+        : 0;
+    }
+
+    function isOwner(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)).data.ownerUserId
+        == request.auth.uid;
+    }
+
+    function hasAccess(eventId) {
+      return exists(/databases/$(database)/documents/events/$(eventId)/access/$(request.auth.uid));
+    }
+
+    function userRole(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)/access/$(request.auth.uid)).data.role;
+    }
+
+    function canRead(eventId) {
+      return isOwner(eventId) || hasAccess(eventId);
+    }
+
+    function canWrite(eventId) {
+      return isOwner(eventId) || userRole(eventId) == "editor";
+    }
+
+    function canMigrate(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)).data.ownerUserId
+        == request.auth.uid;
+    }
+
+    // ───────────────────────────────────────────────
+    // Users
+    // ───────────────────────────────────────────────
+    match /users/{uid} {
+
+      // Only the authenticated user may read their own profile
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow get: if isSignedIn() && request.auth.uid == uid;
+      // Allow querying visible users (for invite search)
+  		allow list: if isSignedIn() && resource.data.profileVisible == true;
+
+      // Create:
+      // - Must be signed in
+      // - Must be creating their own doc
+      // - Doc must NOT already exist (prevents overwriting)
+      allow create: if isSignedIn()
+                    && request.auth.uid == uid
+                    && !exists(/databases/$(database)/documents/users/$(uid));
+
+      // Update:
+      // - Must be signed in
+      // - Must be updating their own doc
+      // - Doc must already exist (prevents accidental create-via-update)
+      allow update: if isSignedIn()
+                    && request.auth.uid == uid
+                    && exists(/databases/$(database)/documents/users/$(uid));
+
+      // Delete:
+      // - User may delete their own profile
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ───────────────────────────────────────────────
+    // Events
+    // ───────────────────────────────────────────────
+
+    // Required for queries on /events
+    match /events {
+      allow list: if isSignedIn();
+    }
+
+    match /events/{eventId} {
+
+      function isOwnerOfCurrentEvent() {
+        return resource.data.ownerUserId == request.auth.uid;
+      }
+
+      function canReadCurrentEvent() {
+        return isOwnerOfCurrentEvent() || hasAccess(eventId);
+      }
+
+      function canWriteCurrentEvent() {
+        return isOwnerOfCurrentEvent() || userRole(eventId) == "editor";
+      }
+
+      // Create: owner must match, and event count limit applies
+      allow create: if isSignedIn()
+                    && request.resource.data.ownerUserId == request.auth.uid
+                    && (isProUser() || userEventCount() <= 1);
+
+      // Read / query
+      allow get, list, read: if isSignedIn() && canReadCurrentEvent();
+
+      // Update: owner or editor
+      allow update: if isSignedIn() && canWriteCurrentEvent();
+
+      // Delete: only owner + pro
+      allow delete: if isSignedIn() && isOwnerOfCurrentEvent() && isProUser();
+    }
+    
+    // ───────────────────────────────────────────────
+    // Event Access
+    // ───────────────────────────────────────────────
+    match /events/{eventId}/access/{accessId} {
+
+      // Any member of the event can list access docs
+      allow list: if isSignedIn() && canRead(eventId);
+
+      // Individual doc: user can read their own
+      allow get: if isSignedIn() && request.auth.uid == accessId;
+
+      // Only the event owner can grant or modify access
+      allow create, update: if isSignedIn() && isOwner(eventId);
+
+      // Event owner or the user themselves can revoke
+      allow delete: if isSignedIn() && (isOwner(eventId) || request.auth.uid == accessId);
+    }
+
+    // Shared Event Discovery — collection group query
+    // Uses resource.data.id because for LIST queries Firestore
+    // evaluates field data, not the path wildcard
+    match /{path=**}/access/{accessId} {
+      allow get: if isSignedIn() && request.auth.uid == accessId;
+      allow list: if isSignedIn() && resource.data.id == request.auth.uid;
+    }
+    
+    // ───────────────────────────────────────────────
+    // Checkpoints
+    // ───────────────────────────────────────────────
+    match /events/{eventId}/checkpoints/{detailId} {
+      allow read: if isSignedIn() && canRead(eventId);
+      allow create, update, delete: if isSignedIn() && canWrite(eventId);
+    }
+
+    // ───────────────────────────────────────────────
+    // Paces
+    // ───────────────────────────────────────────────
+    match /events/{eventId}/paces/{paceId} {
+      allow read: if isSignedIn() && canRead(eventId);
+      allow create, update, delete: if isSignedIn() && canWrite(eventId);
+    }
+
+  }
+}
