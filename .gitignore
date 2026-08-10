@@ -1,4 +1,23 @@
 node_modules/
+
+# ── Never commit ─────────────────────────────────────────────────────────────
+# Service account keys. Admin SDK credentials bypass security rules entirely, so
+# one of these in a repo is a full database compromise. Keep them outside the
+# working tree; the scripts take a --key path.
+*serviceAccount*.json
+*firebase-adminsdk*.json
+*.pem
+
+# Script OUTPUT. Every one of these contains real users' email addresses and
+# names — audits, exports, CSVs. The scripts are version-controlled; what they
+# produce is personal data and must not be.
+*-users.json
+event-users.json
+firestore-users-*.csv
+firestore-events-*.csv
+users-*.json
+*.csv
+
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
