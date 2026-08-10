@@ -49,11 +49,6 @@ service cloud.firestore {
       return isOwner(eventId) || userRole(eventId) == "editor";
     }
 
-    function canMigrate(eventId) {
-      return get(/databases/$(database)/documents/events/$(eventId)).data.ownerUserId
-        == request.auth.uid;
-    }
-
     // ───────────────────────────────────────────────
     // Users
     // ───────────────────────────────────────────────
