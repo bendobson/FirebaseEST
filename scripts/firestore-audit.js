@@ -55,6 +55,11 @@ if (keyFlag === -1 || !args[keyFlag + 1]) {
   console.error("Usage: node scripts/firestore-audit.js --key /path/to/serviceAccountKey.json [--delete-throwaway-guests] [--delete-orphan-events] [--confirm] [--csv]");
   process.exit(1);
 }
+function flagValue(name) {
+  const i = args.indexOf(name);
+  return i !== -1 ? args[i + 1] : null;
+}
+
 const keyPath = path.resolve(args[keyFlag + 1]);
 const deleteThrowawayGuests = args.includes("--delete-throwaway-guests");
 const deleteOrphanEvents = args.includes("--delete-orphan-events");
@@ -64,9 +69,37 @@ const exportCsv = args.includes("--csv");
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 const serviceAccount = require(keyPath);
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+
+// The bucket has to be named explicitly — the Admin SDK doesn't infer it from the
+// credential, and without it every storage call fails with "Bucket name not specified".
+const bucketName = flagValue("--bucket") || `${serviceAccount.project_id}.firebasestorage.app`;
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: bucketName,
+});
 const auth = admin.auth();
 const db = admin.firestore();
+
+/// Whether Firebase Storage is actually provisioned. Checked once, because if it isn't
+/// there is no point asking about a GPX file per event — and the answer is interesting in
+/// its own right: as of 2026-08-10 this project has NO bucket at all, so every GPX upload
+/// the app has ever attempted has failed silently (GPXService treats the upload as
+/// best-effort and only logs it). No event has a gpxStoragePath set.
+let storageAvailable = null;
+async function hasStorage() {
+  if (storageAvailable !== null) return storageAvailable;
+  try {
+    const [exists] = await admin.storage().bucket().exists();
+    storageAvailable = exists;
+  } catch {
+    storageAvailable = false;
+  }
+  if (!storageAvailable) {
+    console.log(`  ℹ️  Storage bucket "${bucketName}" not found — skipping GPX cleanup.\n`);
+  }
+  return storageAvailable;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -380,15 +413,17 @@ async function main() {
       }
 
       // The GPX file, if this event had one. Path per GPXService.importGPX.
-      try {
-        const file = admin.storage().bucket().file(`gpx/${ev.id}.gpx`);
-        const [exists] = await file.exists();
-        if (exists) {
-          if (!dryRun) await file.delete();
-          console.log(`  ${prefix} gpx/${ev.id}.gpx`);
+      if (await hasStorage()) {
+        try {
+          const file = admin.storage().bucket().file(`gpx/${ev.id}.gpx`);
+          const [exists] = await file.exists();
+          if (exists) {
+            if (!dryRun) await file.delete();
+            console.log(`  ${prefix} gpx/${ev.id}.gpx`);
+          }
+        } catch (err) {
+          console.log(`  ⚠️  could not check storage for ${ev.id}: ${err.message.split("\n")[0]}`);
         }
-      } catch (err) {
-        console.log(`  ⚠️  could not check storage for ${ev.id}: ${err.message}`);
       }
 
       if (!dryRun) await db.collection("events").doc(ev.id).delete();
