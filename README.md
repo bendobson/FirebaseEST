@@ -60,6 +60,17 @@ Tests are plain `node --test` — no Jest or Vitest. Layout:
 `UserDTO`, `EventDTO`, `AccessDTO` on iOS and their Android equivalents. A fixture that has
 drifted from what the apps really write makes every test in the file a fiction.
 
+## `.mcp.json`
+
+Configures the Firebase MCP server for anyone working in this repo. It moved here from the
+iOS repo, where it had gone stale — it pins `FIRESTORE_EMULATOR_HOST`, and the emulator lives
+here now, alongside the `firebase.json` the CLI needs.
+
+The emulator pin is a **safety feature, not a leftover**: with it set the MCP server can only
+ever reach the local emulator, so no amount of prompting can make it read or write production.
+Anything that genuinely needs production goes through the admin scripts below, which take an
+explicit `--key`.
+
 ## Admin scripts
 
 All take `--key /path/to/serviceAccountKey.json`, and all deletions are a **dry run unless

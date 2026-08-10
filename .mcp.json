@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "firebase": {
+      "command": "npx",
+      "args": ["-y", "firebase-tools@latest", "mcp", "--only", "firestore"],
+      "env": {
+        "FIRESTORE_EMULATOR_HOST": "127.0.0.1:8080"
+      }
+    }
+  }
+}
