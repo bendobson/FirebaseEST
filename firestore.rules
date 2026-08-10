@@ -104,10 +104,15 @@ service cloud.firestore {
         return isOwnerOfCurrentEvent() || userRole(eventId) == "editor";
       }
 
-      // Create: owner must match, and event count limit applies
+      // Create: owner must match, and the free tier is one event.
+      //
+      // `< 1`, not `<= 1`. The counter is incremented after a create, so a free user with one
+      // event already has eventCount == 1 — `<= 1` let them make a second. That looser value
+      // was test residue. This now matches SubscriptionManager.canCreateEvent, which is
+      // `isProUser || eventCount < 1`.
       allow create: if isSignedIn()
                     && request.resource.data.ownerUserId == request.auth.uid
-                    && (isProUser() || userEventCount() <= 1);
+                    && (isProUser() || userEventCount() < 1);
 
       // Read / query
       allow get, list, read: if isSignedIn() && canReadCurrentEvent();

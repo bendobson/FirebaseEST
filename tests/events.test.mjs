@@ -120,17 +120,16 @@ describe('/events/{eventId}', () => {
     await assertSucceeds(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
   });
 
-  /// ⚠️ WORTH A DECISION. The rule is `userEventCount() <= 1`, so the *rules* let a free user
-  /// hold two events. The app is stricter — SubscriptionManager.canCreateEvent is
-  /// `isProUser || eventCount < 1`, i.e. one. The client limit is the one users experience,
-  /// but the rules are the only one an attacker has to get past.
-  it('lets a free user with one event create a second (rules are looser than the app)', async () => {
+  /// The free tier is one event, and the counter is incremented after a create — so a free
+  /// user holding one event already reads as eventCount == 1 and must be refused. This is
+  /// where the rule used to say `<= 1` and quietly allowed two.
+  it('denies a free user with one event creating a second', async () => {
     await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ eventCount: 1 })));
     const alice = testEnv.authenticatedContext('alice').firestore();
-    await assertSucceeds(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
+    await assertFails(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
   });
 
-  it('denies a free user with two events creating a third', async () => {
+  it('matches the app: SubscriptionManager.canCreateEvent is isProUser || eventCount < 1', async () => {
     await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ eventCount: 2 })));
     const alice = testEnv.authenticatedContext('alice').firestore();
     await assertFails(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
