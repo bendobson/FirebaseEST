@@ -54,6 +54,7 @@ Tests are plain `node --test` — no Jest or Vitest. Layout:
 | `tests/events.test.mjs` | ownership, the viewer/editor split, Pro-only deletion, the free-tier limit |
 | `tests/access.test.mjs` | granting and revoking, and the collection-group query for shared events |
 | `tests/checkpoints.test.mjs` | checkpoints and paces inherit the event's permissions |
+| `tests/storage.test.mjs` | GPX files in Cloud Storage, whose permissions come from Firestore |
 
 `tests/helpers.mjs` holds the fixture document shapes. **Keep them in step with the DTOs** —
 `UserDTO`, `EventDTO`, `AccessDTO` on iOS and their Android equivalents. A fixture that has
@@ -96,10 +97,17 @@ one users meet; the server limit is the only one an attacker has to beat. Pick o
 
 ## Also worth knowing
 
-- **Storage rules are not in this repo yet.** GPX files are uploaded to
-  `gpx/<eventId>.gpx` in Firebase Storage, and those rules are still Console-only — the same
-  gap this repo was created to close. Deliberately not stubbed here: a placeholder that got
-  deployed would be worse than nothing.
+- **Cloud Storage did not exist until 10 Aug 2026.** The project had no bucket at all, so
+  every GPX upload the app had ever attempted failed silently — `GPXService.importGPX` treats
+  the upload as best-effort and only logs a warning. None of the 41 events had a
+  `gpxStoragePath` set. The bucket
+  (`eventtracker-a150e.firebasestorage.app`, Standard, regional, Europe) now exists and
+  `storage.rules` here governs it. GPX files therefore sync and reach shared viewers for the
+  first time; `GPXService.trackPoints`' download fallback had never been able to fire.
+- **Storage permissions live in Firestore.** `storage.rules` calls `firestore.get()` against
+  the same `events/{id}/access/{uid}` documents, so there is one access model rather than two
+  that can drift. It costs a document read per storage operation, which is the right trade for
+  an operation that happens once per import and once per viewer.
 - `match /events { allow list: if isSignedIn(); }` (firestore.rules:94) looks inert —
   Firestore evaluates rules against document paths, and the per-document
   `match /events/{eventId}` block below already grants `list` behind `canReadCurrentEvent()`.

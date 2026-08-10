@@ -24,6 +24,13 @@ export async function makeTestEnv() {
       host: '127.0.0.1',
       port: 8080,
     },
+    // Loaded for every test env, not just the storage tests: storage.rules calls
+    // firestore.get(), so the two emulators have to be able to see each other.
+    storage: {
+      rules: readFileSync(join(here, '..', 'storage.rules'), 'utf8'),
+      host: '127.0.0.1',
+      port: 9199,
+    },
   });
 }
 

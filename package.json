@@ -4,10 +4,10 @@
   "private": true,
   "description": "Firestore security rules and indexes for Event Support Tracker (iOS + Android)",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore \"node --test --test-concurrency=1 tests/*.test.mjs\"",
-    "test:watch": "firebase emulators:exec --only firestore \"node --test --watch tests/\"",
+    "test": "firebase emulators:exec --only firestore,storage \"node --test --test-concurrency=1 tests/*.test.mjs\"",
+    "test:watch": "firebase emulators:exec --only firestore,storage \"node --test --watch tests/\"",
     "emulators": "firebase emulators:start --only firestore",
-    "deploy:prod": "firebase deploy --only firestore:rules,firestore:indexes --project prod",
+    "deploy:prod": "firebase deploy --only firestore:rules,firestore:indexes,storage --project prod",
     "audit": "node scripts/firestore-audit.js"
   },
   "devDependencies": {

@@ -1,0 +1,99 @@
+rules_version = '2';
+
+// GPX route files for Event Support Tracker.
+//
+// Permission is not a property of the file — it's a property of the event the file belongs
+// to, so every rule here defers to Firestore. A GPX is readable by anyone who can read its
+// event and writable by anyone who can edit it, which keeps one access model rather than two
+// that can drift apart.
+//
+// Layout, set by GPXService.importGPX:  gpx/<eventId>.gpx
+//
+// Note these rules cost a Firestore document read (sometimes two) per storage operation.
+// That's the price of not duplicating the access model, and GPX operations are rare — one
+// upload per import, one download per viewer.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // The object is named "<eventId>.gpx" and event ids are UUIDs, which contain no dots,
+    // so the first dot-separated segment is the whole id.
+    function eventIdOf(fileName) {
+      return fileName.split('\\.')[0];
+    }
+
+    function eventPath(eventId) {
+      return /databases/(default)/documents/events/$(eventId);
+    }
+
+    function accessPath(eventId) {
+      return /databases/(default)/documents/events/$(eventId)/access/$(request.auth.uid);
+    }
+
+    // Guard every get() with an exists(). Reading a document that isn't there is an error in
+    // rules, not a null — so an upload naming a nonexistent event would fail confusingly
+    // rather than simply being denied.
+    function eventExists(eventId) {
+      return firestore.exists(eventPath(eventId));
+    }
+
+    function isOwner(eventId) {
+      return firestore.get(eventPath(eventId)).data.ownerUserId == request.auth.uid;
+    }
+
+    function hasAccess(eventId) {
+      return firestore.exists(accessPath(eventId));
+    }
+
+    function isEditor(eventId) {
+      return hasAccess(eventId)
+        && firestore.get(accessPath(eventId)).data.role == 'editor';
+    }
+
+    function canReadEvent(eventId) {
+      return eventExists(eventId) && (isOwner(eventId) || hasAccess(eventId));
+    }
+
+    function canWriteEvent(eventId) {
+      return eventExists(eventId) && (isOwner(eventId) || isEditor(eventId));
+    }
+
+    // A generous ceiling. A 100 km route at one point per few metres is a few hundred KB, so
+    // this stops the bucket being used as free file hosting without ever refusing a real
+    // route. Deliberately no content-type check: the iOS SDK doesn't set one reliably for
+    // .gpx (it lands as application/octet-stream), gating on it would break uploads, and it
+    // buys nothing — the bytes are only ever fed to our own parser, which rejects anything
+    // that isn't GPX.
+    function withinSizeLimit() {
+      return request.resource.size < 20 * 1024 * 1024;
+    }
+
+    function isGPXFileName(fileName) {
+      return fileName.matches('^[A-Za-z0-9-]+\\.gpx$');
+    }
+
+    match /gpx/{fileName} {
+
+      allow read: if isSignedIn()
+                  && isGPXFileName(fileName)
+                  && canReadEvent(eventIdOf(fileName));
+
+      // Covers create, update and delete. On a delete `request.resource` is null, so the size
+      // check only applies to the two that carry a body.
+      allow write: if isSignedIn()
+                   && isGPXFileName(fileName)
+                   && canWriteEvent(eventIdOf(fileName))
+                   && (request.resource == null || withinSizeLimit());
+    }
+
+    // Everything else. Unmatched paths are denied anyway; this says so out loud, so adding a
+    // new prefix is a deliberate act rather than something that silently inherits access.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
