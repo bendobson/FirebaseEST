@@ -60,6 +60,30 @@ Tests are plain `node --test` — no Jest or Vitest. Layout:
 `UserDTO`, `EventDTO`, `AccessDTO` on iOS and their Android equivalents. A fixture that has
 drifted from what the apps really write makes every test in the file a fiction.
 
+## Admin scripts
+
+All take `--key /path/to/serviceAccountKey.json`, and all deletions are a **dry run unless
+`--confirm` is passed**. The key lives outside this repository — Admin SDK credentials bypass
+the security rules entirely.
+
+| Script | Does |
+|---|---|
+| `scripts/firestore-audit.js` | Reports Auth users, their documents and events, and the three kinds of debris: throwaway guests, orphan events, orphan user documents. Flags for cleaning each. |
+| `scripts/migrate-roles.js` | Rewrites access-document roles as canonical tokens. See "Roles" below. |
+| `scripts/reconcile-event-counts.js` | Sets each user's `eventCount` to the events they actually own. |
+| `scripts/export-users.js` | Email/name export of registered users. Output is personal data — gitignored. |
+
+Debris the audit looks for, and why each exists:
+
+- **Throwaway guests** — anonymous, own nothing, signed in once. 126 removed on 2026-08-10.
+- **Orphan events** — `ownerUserId` matches no Auth record.
+- **Orphan user documents** — the mirror image, a `users/{uid}` with no Auth record. The likely
+  source is a failed guest→registered migration: `AuthManager.createAccount` deletes the
+  anonymous Auth account *first* (Firebase can only delete the signed-in user), and the
+  Firestore cleanup happens later inside `migrateGuestUser`'s `try`, which swallows its errors.
+  Only those owning no events are deleted automatically — one that still owns events would
+  strand them, so it's reported for manual attention instead.
+
 ## Known problems these tests pin
 
 Found while writing them. All three are app-side; the rules behave as written.

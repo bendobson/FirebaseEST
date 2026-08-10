@@ -15,6 +15,8 @@
  * Optional flags:
  *   --delete-throwaway-guests  Delete anonymous users that were never really used
  *   --delete-orphan-events     Delete events whose ownerUserId has no Auth user
+ *   --delete-orphan-user-docs  Delete users/{uid} documents with no Auth record, but only
+ *                              those owning no events
  *   --confirm                  Actually perform deletions. Without it, both delete
  *                              flags run as a dry run and only print what they would do.
  *   --csv                      Write users/events CSVs (personal data — gitignored)
@@ -52,7 +54,7 @@ const path = require("path");
 const args = process.argv.slice(2);
 const keyFlag = args.indexOf("--key");
 if (keyFlag === -1 || !args[keyFlag + 1]) {
-  console.error("Usage: node scripts/firestore-audit.js --key /path/to/serviceAccountKey.json [--delete-throwaway-guests] [--delete-orphan-events] [--confirm] [--csv]");
+  console.error("Usage: node scripts/firestore-audit.js --key /path/to/serviceAccountKey.json [--delete-throwaway-guests] [--delete-orphan-events] [--delete-orphan-user-docs] [--confirm] [--csv]");
   process.exit(1);
 }
 function flagValue(name) {
@@ -63,6 +65,7 @@ function flagValue(name) {
 const keyPath = path.resolve(args[keyFlag + 1]);
 const deleteThrowawayGuests = args.includes("--delete-throwaway-guests");
 const deleteOrphanEvents = args.includes("--delete-orphan-events");
+const deleteOrphanUserDocs = args.includes("--delete-orphan-user-docs");
 const confirmed = args.includes("--confirm");
 const exportCsv = args.includes("--csv");
 
@@ -251,7 +254,45 @@ async function main() {
     console.log();
   }
 
-  // ── Section 2: Orphan events ──────────────────────────────────────────────
+  // ── Section 2: Orphan user documents ──────────────────────────────────────
+  //
+  // The mirror image of an orphan event: a users/{uid} document whose Auth record is gone.
+  // The audit used to look only for events with no owner, so this direction went unreported.
+  //
+  // The likely source is a failed guest→registered migration. AuthManager.createAccount
+  // deletes the anonymous Auth account FIRST, deliberately — Firebase can only delete the
+  // currently signed-in user — and the Firestore cleanup happens later inside
+  // migrateGuestUser's try block, which swallows its errors. If anything in between throws,
+  // the Auth record is already gone and the document survives with no owner.
+
+  const orphanUserDocs = Object.entries(firestoreUsers)
+    .filter(([uid]) => !authUidSet.has(uid))
+    .map(([uid, doc]) => ({ uid, doc, ownedEvents: eventsByOwner[uid] || [] }));
+
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log(`  ORPHAN USER DOCUMENTS  (${orphanUserDocs.length})`);
+  console.log("═══════════════════════════════════════════════════════════\n");
+
+  if (orphanUserDocs.length === 0) {
+    console.log("  Every user document has an Auth record. ✓\n");
+  } else {
+    for (const { uid, doc, ownedEvents } of orphanUserDocs) {
+      console.log(`  • users/${uid}`);
+      console.log(`    Username:     ${doc.username || "—"}`);
+      console.log(`    Guest:        ${doc.isGuest === true ? "YES" : "no"}`);
+      console.log(`    Events owned: ${ownedEvents.length}`);
+      if (ownedEvents.length > 0) {
+        console.log(`    ⚠️  Owns events — deleting this document would strand them. Resolve by hand.`);
+      }
+      console.log();
+    }
+  }
+
+  // Only those owning nothing are safe to remove automatically. One that still owns events is
+  // a different problem: its events would become orphan events with no owner to reason about.
+  const deletableUserDocs = orphanUserDocs.filter(o => o.ownedEvents.length === 0);
+
+  // ── Section 3: Orphan events ──────────────────────────────────────────────
 
   const orphanEvents = events.filter(ev => !authUidSet.has(ev.ownerUserId));
 
@@ -286,6 +327,7 @@ async function main() {
   console.log(`      Guests with events:    ${guestsWithEvents.length}`);
   console.log(`      Guests no Firestore:   ${guestsWithoutDoc.length}`);
   console.log(`      Throwaway guests:      ${throwawayGuests.length}`);
+  console.log(`  Orphan user documents:     ${orphanUserDocs.length}`);
   console.log(`  Total events:              ${events.length}`);
   console.log(`  Orphan events:             ${orphanEvents.length}`);
   console.log();
@@ -398,6 +440,19 @@ async function main() {
     console.log("Done.\n");
   }
 
+  if (deleteOrphanUserDocs && deletableUserDocs.length > 0) {
+    console.log(`${dryRun ? "[DRY RUN] " : ""}Removing ${deletableUserDocs.length} orphan user document(s)...`);
+    for (const { uid } of deletableUserDocs) {
+      if (!dryRun) await db.collection("users").doc(uid).delete();
+      console.log(`  ${prefix} users/${uid}`);
+    }
+    const stranded = orphanUserDocs.length - deletableUserDocs.length;
+    if (stranded > 0) {
+      console.log(`  ⚠️  ${stranded} left alone because they still own events.`);
+    }
+    console.log("Done.\n");
+  }
+
   if (deleteOrphanEvents && orphanEvents.length > 0) {
     console.log(`${dryRun ? "[DRY RUN] " : ""}Removing ${orphanEvents.length} orphan event(s)...`);
 
@@ -432,16 +487,19 @@ async function main() {
     console.log("Done.\n");
   }
 
-  if (dryRun && (deleteThrowawayGuests || deleteOrphanEvents)) {
+  if (dryRun && (deleteThrowawayGuests || deleteOrphanEvents || deleteOrphanUserDocs)) {
     console.log("Nothing was changed. Re-run with --confirm to apply.\n");
   }
 
-  if (!deleteThrowawayGuests && !deleteOrphanEvents) {
+  if (!deleteThrowawayGuests && !deleteOrphanEvents && !deleteOrphanUserDocs) {
     if (throwawayGuests.length > 0) {
       console.log(`Tip: --delete-throwaway-guests would remove ${throwawayGuests.length} guest(s). Add --confirm to apply.`);
     }
     if (orphanEvents.length > 0) {
       console.log(`Tip: --delete-orphan-events would remove ${orphanEvents.length} event(s). Add --confirm to apply.`);
+    }
+    if (deletableUserDocs.length > 0) {
+      console.log(`Tip: --delete-orphan-user-docs would remove ${deletableUserDocs.length} user document(s). Add --confirm to apply.`);
     }
   }
 }
