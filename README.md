@@ -143,6 +143,18 @@ one users meet; the server limit is the only one an attacker has to beat. Pick o
   the same `events/{id}/access/{uid}` documents, so there is one access model rather than two
   that can drift. It costs a document read per storage operation, which is the right trade for
   an operation that happens once per import and once per viewer.
+- **Cross-service rules need an IAM grant, and only in production.** Because `storage.rules`
+  reaches into Firestore, the Firebase Rules service agent must hold
+  `roles/firebaserules.firestoreServiceAgent` before any of those `firestore.get()` calls can
+  run. Until it does, the Storage section of the Console shows *"Your rules make use of
+  cross-service database calls, but your project is not configured to execute those calls"* and
+  **every** GPX read and write is denied — which looks exactly like a rules bug and isn't one.
+  Granted for `eventtracker-a150e` on 18 Aug 2026 via the Console banner's one-click fix; GPX
+  files have stored correctly since.
+
+  The emulators never check this, so `tests/storage.test.mjs` passes whether or not the grant
+  exists. No test in this repo can catch its absence. If GPX suddenly stops working across the
+  board, check the grant before reading the rules, and re-grant it on any new project.
 - `match /events { allow list: if isSignedIn(); }` (firestore.rules:94) looks inert —
   Firestore evaluates rules against document paths, and the per-document
   `match /events/{eventId}` block below already grants `list` behind `canReadCurrentEvent()`.
