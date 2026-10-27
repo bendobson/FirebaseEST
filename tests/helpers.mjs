@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
+import { doc, setDoc } from 'firebase/firestore';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -88,4 +89,13 @@ export function checkpointDoc(overrides = {}) {
     createdBy: 'someone',
     ...overrides,
   };
+}
+
+/// Pro user docs for each uid. Shared events, sharing and GPX are Pro in the rules (as in the
+/// apps), so tests about roles make their members Pro; the free cases have their own tests
+/// in audit.test.mjs.
+export async function proUsers(db, ...uids) {
+  for (const uid of uids) {
+    await setDoc(doc(db, `users/${uid}`), userDoc({ isProUser: true, username: uid }));
+  }
 }

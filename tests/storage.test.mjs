@@ -9,7 +9,7 @@ import { before, after, beforeEach, describe, it } from 'node:test';
 import { assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getMetadata, deleteObject } from 'firebase/storage';
-import { makeTestEnv, seed, eventDoc, accessDoc } from './helpers.mjs';
+import { makeTestEnv, seed, eventDoc, accessDoc, proUsers } from './helpers.mjs';
 
 const GPX = new Uint8Array(
   Buffer.from(`<?xml version="1.0"?><gpx version="1.1"><trk><trkseg>
@@ -37,6 +37,7 @@ describe('gpx/{eventId}.gpx', () => {
       for (const [uid, role] of Object.entries(access)) {
         await setDoc(doc(db, `events/${EVENT}/access/${uid}`), accessDoc(uid, role));
       }
+      await proUsers(db, 'alice', ...Object.keys(access));
     });
   }
 

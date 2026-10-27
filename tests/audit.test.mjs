@@ -21,7 +21,8 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { makeTestEnv, seed, userDoc, eventDoc, accessDoc, checkpointDoc } from './helpers.mjs';
+import { ref, uploadBytes, getMetadata, deleteObject } from 'firebase/storage';
+import { makeTestEnv, seed, userDoc, eventDoc, accessDoc, checkpointDoc, proUsers } from './helpers.mjs';
 
 describe('rules audit (Oct 2026)', () => {
   let testEnv;
@@ -30,9 +31,11 @@ describe('rules audit (Oct 2026)', () => {
   after(async () => { await testEnv.cleanup(); });
   beforeEach(async () => { await testEnv.clearFirestore(); });
 
-  /// alice owns evt1; bob is an editor, carol a viewer.
+  /// alice owns evt1; bob is an editor, carol a viewer. All three are Pro unless `users`
+  /// says otherwise.
   async function seedShared(users = {}) {
     await seed(testEnv, async (db) => {
+      await proUsers(db, 'alice', 'bob', 'carol');
       await setDoc(doc(db, 'events/evt1'), eventDoc('alice'));
       await setDoc(doc(db, 'events/evt1/access/alice'), accessDoc('alice', 'owner'));
       await setDoc(doc(db, 'events/evt1/access/bob'), accessDoc('bob', 'editor'));
@@ -164,19 +167,109 @@ describe('rules audit (Oct 2026)', () => {
     });
 
     /// Pro status and the free-tier counter are client-written, so a user can grant
-    /// themselves Pro. Fix: Notion task "Move Pro status and event count server-side…"
-    /// (stage 3 locks these fields).
+    /// themselves Pro, which opens every Pro gate below. Fix: Notion task "Move Pro status
+    /// and event count server-side…" (stage 3 locks these fields).
     it('a user can make themselves Pro, or reset their event count', async () => {
       await seedShared({ mallory: { isProUser: false, eventCount: 1 } });
       await assertSucceeds(updateDoc(doc(as('mallory'), 'users/mallory'), { isProUser: true }));
       await assertSucceeds(updateDoc(doc(as('mallory'), 'users/mallory'), { eventCount: 0 }));
     });
 
-    /// Sharing is Pro in both apps (canShareEvents), but the rules let any owner share.
-    /// Decision needed: enforce Pro in the rules, or accept it as a UI-only gate.
-    it('a free owner can share an event', async () => {
-      await seedShared({ alice: { isProUser: false } });
-      await assertSucceeds(setDoc(doc(as('alice'), 'events/evt1/access/dave'), accessDoc('dave', 'viewer')));
+  });
+
+  // ─── Pro gates, the same as the apps (decided 27 Oct 2026) ─────────────────
+
+  describe('Pro gates', () => {
+    const FREE = { isProUser: false };
+
+    it("a free member can't see a shared event, its checkpoints, paces or members (canSeeSharedEvents)", async () => {
+      await seedShared({ carol: FREE });
+      const carol = as('carol');
+      await assertFails(getDoc(doc(carol, 'events/evt1')));
+      await assertFails(getDoc(doc(carol, 'events/evt1/checkpoints/cp1')));
+      await assertFails(getDocs(collection(carol, 'events/evt1/paces')));
+      await assertFails(getDocs(collection(carol, 'events/evt1/access')));
+    });
+
+    it('a free member still finds that they were invited, and can leave', async () => {
+      await seedShared({ carol: FREE });
+      const carol = as('carol');
+      await assertSucceeds(getDoc(doc(carol, 'events/evt1/access/carol')));
+      await assertSucceeds(deleteDoc(doc(carol, 'events/evt1/access/carol')));
+    });
+
+    it("a free editor can't edit a shared event", async () => {
+      await seedShared({ bob: FREE });
+      await assertFails(updateDoc(doc(as('bob'), 'events/evt1'), { name: 'Renamed' }));
+      await assertFails(updateDoc(doc(as('bob'), 'events/evt1/checkpoints/cp1'), { stopName: 'X' }));
+    });
+
+    it('a free owner keeps full use of their own event', async () => {
+      await seedShared({ alice: FREE });
+      const alice = as('alice');
+      await assertSucceeds(getDoc(doc(alice, 'events/evt1')));
+      await assertSucceeds(updateDoc(doc(alice, 'events/evt1'), { name: 'Renamed' }));
+      await assertSucceeds(updateDoc(doc(alice, 'events/evt1/checkpoints/cp1'), { stopName: 'X' }));
+      await assertSucceeds(getDocs(collection(alice, 'events/evt1/access')));
+    });
+
+    it("a free owner can't share or change a role (canShareEvents), but can stop sharing", async () => {
+      await seedShared({ alice: FREE });
+      const alice = as('alice');
+      await assertFails(setDoc(doc(alice, 'events/evt1/access/dave'), accessDoc('dave', 'viewer')));
+      await assertFails(updateDoc(doc(alice, 'events/evt1/access/carol'), { role: 'editor' }));
+      await assertSucceeds(deleteDoc(doc(alice, 'events/evt1/access/carol')));
+    });
+
+    it('a free user can still write their own owner doc, so creating their one event works', async () => {
+      await seedShared({ alice: FREE });
+      await assertSucceeds(setDoc(doc(as('alice'), 'events/evt1/access/alice'), accessDoc('alice', 'owner')));
+    });
+
+    describe('GPX (canUseGPXRoutes)', () => {
+      const EVENT = 'A1B2C3D4-0000-4000-8000-00000000AAAA';
+      const path = `gpx/${EVENT}.gpx`;
+      const GPX = new Uint8Array(Buffer.from('<?xml version="1.0"?><gpx version="1.1"></gpx>'));
+      const storageAs = (uid) => testEnv.authenticatedContext(uid).storage();
+
+      async function seedGpxEvent(users) {
+        await seed(testEnv, async (db) => {
+          await setDoc(doc(db, `events/${EVENT}`), eventDoc('alice'));
+          await setDoc(doc(db, `events/${EVENT}/access/bob`), accessDoc('bob', 'editor'));
+          for (const [uid, overrides] of Object.entries(users)) {
+            await setDoc(doc(db, `users/${uid}`), userDoc(overrides));
+          }
+        });
+        await testEnv.withSecurityRulesDisabled(async (context) => {
+          await uploadBytes(ref(context.storage(), path), GPX);
+        });
+      }
+
+      beforeEach(async () => { await testEnv.clearStorage(); });
+
+      it("a free owner can't upload or view a route, but can remove one", async () => {
+        await seedGpxEvent({ alice: FREE });
+        const alice = storageAs('alice');
+        await assertFails(uploadBytes(ref(alice, path), GPX));
+        await assertFails(getMetadata(ref(alice, path)));
+        await assertSucceeds(deleteObject(ref(alice, path)));
+      });
+
+      it('a Pro owner can upload, view and remove', async () => {
+        await seedGpxEvent({ alice: { isProUser: true } });
+        const alice = storageAs('alice');
+        await assertSucceeds(uploadBytes(ref(alice, path), GPX));
+        await assertSucceeds(getMetadata(ref(alice, path)));
+        await assertSucceeds(deleteObject(ref(alice, path)));
+      });
+
+      it("a free editor can't upload, view or remove a route on a shared event", async () => {
+        await seedGpxEvent({ bob: FREE });
+        const bob = storageAs('bob');
+        await assertFails(uploadBytes(ref(bob, path), GPX));
+        await assertFails(getMetadata(ref(bob, path)));
+        await assertFails(deleteObject(ref(bob, path)));
+      });
     });
   });
 });

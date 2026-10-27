@@ -1,7 +1,7 @@
 import { before, after, beforeEach, describe, it } from 'node:test';
 import { assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { makeTestEnv, seed, userDoc, eventDoc, accessDoc } from './helpers.mjs';
+import { makeTestEnv, seed, userDoc, eventDoc, accessDoc, proUsers } from './helpers.mjs';
 
 describe('/events/{eventId}', () => {
   let testEnv;
@@ -17,6 +17,7 @@ describe('/events/{eventId}', () => {
       for (const [uid, role] of Object.entries(access)) {
         await setDoc(doc(db, `events/evt1/access/${uid}`), accessDoc(uid, role));
       }
+      await proUsers(db, ...Object.keys(access).filter((uid) => !(uid in users)));
       for (const [uid, overrides] of Object.entries(users)) {
         await setDoc(doc(db, `users/${uid}`), userDoc(overrides));
       }

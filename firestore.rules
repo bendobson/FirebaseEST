@@ -41,12 +41,17 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/events/$(eventId)/access/$(request.auth.uid)).data.role;
     }
 
+    // Pro gates, the same as the apps' SubscriptionManager (decided 27 Oct 2026: the web has
+    // exactly the apps' Pro-only gates, enforced here):
+    // - canSeeSharedEvents: anyone but the owner needs Pro to read a shared event.
+    // - Editing a shared event follows from seeing it, so an editor needs Pro too.
+    // The owner always reads and edits their own event, Pro or not.
     function canRead(eventId) {
-      return isOwner(eventId) || hasAccess(eventId);
+      return isOwner(eventId) || (hasAccess(eventId) && isProUser());
     }
 
     function canWrite(eventId) {
-      return isOwner(eventId) || userRole(eventId) == "editor";
+      return isOwner(eventId) || (userRole(eventId) == "editor" && isProUser());
     }
 
     // ───────────────────────────────────────────────
@@ -96,12 +101,13 @@ service cloud.firestore {
         return resource.data.ownerUserId == request.auth.uid;
       }
 
+      // Same gates as canRead / canWrite above (shared events are Pro).
       function canReadCurrentEvent() {
-        return isOwnerOfCurrentEvent() || hasAccess(eventId);
+        return isOwnerOfCurrentEvent() || (hasAccess(eventId) && isProUser());
       }
 
       function canWriteCurrentEvent() {
-        return isOwnerOfCurrentEvent() || userRole(eventId) == "editor";
+        return isOwnerOfCurrentEvent() || (userRole(eventId) == "editor" && isProUser());
       }
 
       // Create: owner must match, and the free tier is one event.
@@ -147,12 +153,17 @@ service cloud.firestore {
       // - The role is "editor" or "viewer". "owner" only on the event owner's own doc: an
       //   access-doc owner who isn't ownerUserId gets no write access from these rules, so
       //   granting it (iOS offers it) silently made someone read-only.
+      //
+      // Sharing is Pro (canShareEvents). The owner's own owner doc, written when any event is
+      // created, is free, so a free user can still create their one event.
       allow create, update: if isSignedIn()
                             && isOwner(eventId)
                             && request.resource.data.id == accessId
-                            && validRoleFor(eventId, accessId, request.resource.data.role);
+                            && validRoleFor(eventId, accessId, request.resource.data.role)
+                            && (isProUser() || accessId == request.auth.uid);
 
-      // Event owner or the user themselves can revoke
+      // Event owner or the user themselves can revoke. Free, so a lapsed subscriber can still
+      // stop sharing, and anyone can leave an event.
       allow delete: if isSignedIn() && (isOwner(eventId) || request.auth.uid == accessId);
     }
 
