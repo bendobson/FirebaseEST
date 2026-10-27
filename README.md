@@ -17,14 +17,18 @@ Related repositories:
 
 The default project is **`demo-eventsupporttracker`**, which does not exist and is not
 supposed to — the `demo-` prefix is Firebase's convention for a project that only ever runs
-against emulators, and it stops a stray command reaching anything real. Production
-(`eventtracker-a150e`) is a named alias, so deploying to it is always deliberate:
+against emulators, and it stops a stray command reaching anything real. The two real projects
+are named aliases, so deploying to either is always deliberate:
 
 ```bash
-npm run deploy:prod          # firebase deploy --only firestore:rules,firestore:indexes --project prod
+npm run deploy:develop       # est-develop: testers, the develop app builds and the web planner
+npm run deploy:prod          # eventtracker-a150e: live
 ```
 
-Never `firebase deploy` without `--project prod`, and never assume the working tree matches
+Both deploy Firestore rules, Firestore indexes and Storage rules, so the two projects stay
+identical. Deploy to develop first, test with the develop builds, then live.
+
+Never `firebase deploy` without `--project`, and never assume the working tree matches
 what is live: until this repo existed, the rules lived **only in the Firebase Console**, so
 the Console is still the authority for anything not yet committed here. Check before
 deploying.
