@@ -1,6 +1,7 @@
 {
   "projects": {
     "default": "demo-eventsupporttracker",
-    "prod": "eventtracker-a150e"
+    "prod": "eventtracker-a150e",
+    "develop": "est-develop"
   }
 }

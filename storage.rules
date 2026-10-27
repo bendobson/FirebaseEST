@@ -54,6 +54,16 @@ service firebase.storage {
         && firestore.get(accessPath(eventId)).data.role == 'editor';
     }
 
+    // Pro, as in the apps' SubscriptionManager (decided 27 Oct 2026). Read from the user's
+    // own users/{uid} doc, guarded with exists() like every other get() here.
+    function userPath() {
+      return /databases/(default)/documents/users/$(request.auth.uid);
+    }
+
+    function isPro() {
+      return firestore.exists(userPath()) && firestore.get(userPath()).data.isProUser == true;
+    }
+
     function canReadEvent(eventId) {
       return eventExists(eventId) && (isOwner(eventId) || hasAccess(eventId));
     }
@@ -78,16 +88,24 @@ service firebase.storage {
 
     match /gpx/{fileName} {
 
+      // GPX routes are Pro (canUseGPXRoutes): viewing the route, and uploading or replacing
+      // it. Deleting stays free, so a lapsed subscriber can always clear a route.
       allow read: if isSignedIn()
                   && isGPXFileName(fileName)
-                  && canReadEvent(eventIdOf(fileName));
+                  && canReadEvent(eventIdOf(fileName))
+                  && isPro();
 
-      // Covers create, update and delete. On a delete `request.resource` is null, so the size
-      // check only applies to the two that carry a body.
-      allow write: if isSignedIn()
-                   && isGPXFileName(fileName)
-                   && canWriteEvent(eventIdOf(fileName))
-                   && (request.resource == null || withinSizeLimit());
+      allow create, update: if isSignedIn()
+                            && isGPXFileName(fileName)
+                            && canWriteEvent(eventIdOf(fileName))
+                            && withinSizeLimit()
+                            && isPro();
+
+      // An editor deleting on someone else's event needs Pro, like any shared-event edit.
+      allow delete: if isSignedIn()
+                    && isGPXFileName(fileName)
+                    && canWriteEvent(eventIdOf(fileName))
+                    && (isOwner(eventIdOf(fileName)) || isPro());
     }
 
     // Everything else. Unmatched paths are denied anyway; this says so out loud, so adding a

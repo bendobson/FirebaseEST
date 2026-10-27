@@ -41,12 +41,17 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/events/$(eventId)/access/$(request.auth.uid)).data.role;
     }
 
+    // Pro gates, the same as the apps' SubscriptionManager (decided 27 Oct 2026: the web has
+    // exactly the apps' Pro-only gates, enforced here):
+    // - canSeeSharedEvents: anyone but the owner needs Pro to read a shared event.
+    // - Editing a shared event follows from seeing it, so an editor needs Pro too.
+    // The owner always reads and edits their own event, Pro or not.
     function canRead(eventId) {
-      return isOwner(eventId) || hasAccess(eventId);
+      return isOwner(eventId) || (hasAccess(eventId) && isProUser());
     }
 
     function canWrite(eventId) {
-      return isOwner(eventId) || userRole(eventId) == "editor";
+      return isOwner(eventId) || (userRole(eventId) == "editor" && isProUser());
     }
 
     // ───────────────────────────────────────────────
@@ -96,12 +101,13 @@ service cloud.firestore {
         return resource.data.ownerUserId == request.auth.uid;
       }
 
+      // Same gates as canRead / canWrite above (shared events are Pro).
       function canReadCurrentEvent() {
-        return isOwnerOfCurrentEvent() || hasAccess(eventId);
+        return isOwnerOfCurrentEvent() || (hasAccess(eventId) && isProUser());
       }
 
       function canWriteCurrentEvent() {
-        return isOwnerOfCurrentEvent() || userRole(eventId) == "editor";
+        return isOwnerOfCurrentEvent() || (userRole(eventId) == "editor" && isProUser());
       }
 
       // Create: owner must match, and the free tier is one event.
@@ -117,8 +123,13 @@ service cloud.firestore {
       // Read / query
       allow get, list, read: if isSignedIn() && canReadCurrentEvent();
 
-      // Update: owner or editor
-      allow update: if isSignedIn() && canWriteCurrentEvent();
+      // Update: owner or editor. ownerUserId never changes after create (audit, Oct 2026):
+      // Android's migrateStaleOwnerUserId used an editor's write to take ownership (JCW D2,
+      // live). iOS guest migration also rewrites it, but that write is already refused here,
+      // because the new account is neither owner nor editor of the guest's events.
+      allow update: if isSignedIn()
+                    && canWriteCurrentEvent()
+                    && request.resource.data.ownerUserId == resource.data.ownerUserId;
 
       // Delete: only owner + pro
       allow delete: if isSignedIn() && isOwnerOfCurrentEvent() && isProUser();
@@ -135,11 +146,31 @@ service cloud.firestore {
       // Individual doc: user can read their own
       allow get: if isSignedIn() && request.auth.uid == accessId;
 
-      // Only the event owner can grant or modify access
-      allow create, update: if isSignedIn() && isOwner(eventId);
+      // Only the event owner can grant or modify access, and the doc must be well formed
+      // (audit, Oct 2026):
+      // - `id` equals the doc ID, because shared-event discovery (the collection-group rule
+      //   below) filters on it.
+      // - The role is "editor" or "viewer". "owner" only on the event owner's own doc: an
+      //   access-doc owner who isn't ownerUserId gets no write access from these rules, so
+      //   granting it (iOS offers it) silently made someone read-only.
+      //
+      // Sharing is Pro (canShareEvents). The owner's own owner doc, written when any event is
+      // created, is free, so a free user can still create their one event.
+      allow create, update: if isSignedIn()
+                            && isOwner(eventId)
+                            && request.resource.data.id == accessId
+                            && validRoleFor(eventId, accessId, request.resource.data.role)
+                            && (isProUser() || accessId == request.auth.uid);
 
-      // Event owner or the user themselves can revoke
+      // Event owner or the user themselves can revoke. Free, so a lapsed subscriber can still
+      // stop sharing, and anyone can leave an event.
       allow delete: if isSignedIn() && (isOwner(eventId) || request.auth.uid == accessId);
+    }
+
+    function validRoleFor(eventId, accessId, role) {
+      return role in ["editor", "viewer"]
+        || (role == "owner"
+            && get(/databases/$(database)/documents/events/$(eventId)).data.ownerUserId == accessId);
     }
 
     // Shared Event Discovery — collection group query

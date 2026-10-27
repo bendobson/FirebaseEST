@@ -17,14 +17,18 @@ Related repositories:
 
 The default project is **`demo-eventsupporttracker`**, which does not exist and is not
 supposed to — the `demo-` prefix is Firebase's convention for a project that only ever runs
-against emulators, and it stops a stray command reaching anything real. Production
-(`eventtracker-a150e`) is a named alias, so deploying to it is always deliberate:
+against emulators, and it stops a stray command reaching anything real. The two real projects
+are named aliases, so deploying to either is always deliberate:
 
 ```bash
-npm run deploy:prod          # firebase deploy --only firestore:rules,firestore:indexes --project prod
+npm run deploy:develop       # est-develop: testers, the develop app builds and the web planner
+npm run deploy:prod          # eventtracker-a150e: live
 ```
 
-Never `firebase deploy` without `--project prod`, and never assume the working tree matches
+Both deploy Firestore rules, Firestore indexes and Storage rules, so the two projects stay
+identical. Deploy to develop first, test with the develop builds, then live.
+
+Never `firebase deploy` without `--project`, and never assume the working tree matches
 what is live: until this repo existed, the rules lived **only in the Firebase Console**, so
 the Console is still the authority for anything not yet committed here. Check before
 deploying.
@@ -143,6 +147,18 @@ one users meet; the server limit is the only one an attacker has to beat. Pick o
   the same `events/{id}/access/{uid}` documents, so there is one access model rather than two
   that can drift. It costs a document read per storage operation, which is the right trade for
   an operation that happens once per import and once per viewer.
+- **Cross-service rules need an IAM grant, and only in production.** Because `storage.rules`
+  reaches into Firestore, the Firebase Rules service agent must hold
+  `roles/firebaserules.firestoreServiceAgent` before any of those `firestore.get()` calls can
+  run. Until it does, the Storage section of the Console shows *"Your rules make use of
+  cross-service database calls, but your project is not configured to execute those calls"* and
+  **every** GPX read and write is denied — which looks exactly like a rules bug and isn't one.
+  Granted for `eventtracker-a150e` on 18 Aug 2026 via the Console banner's one-click fix; GPX
+  files have stored correctly since.
+
+  The emulators never check this, so `tests/storage.test.mjs` passes whether or not the grant
+  exists. No test in this repo can catch its absence. If GPX suddenly stops working across the
+  board, check the grant before reading the rules, and re-grant it on any new project.
 - `match /events { allow list: if isSignedIn(); }` (firestore.rules:94) looks inert —
   Firestore evaluates rules against document paths, and the per-document
   `match /events/{eventId}` block below already grants `list` behind `canReadCurrentEvent()`.

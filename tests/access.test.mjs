@@ -3,7 +3,7 @@ import { assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import {
   doc, getDoc, setDoc, deleteDoc, collection, collectionGroup, query, where, getDocs,
 } from 'firebase/firestore';
-import { makeTestEnv, seed, eventDoc, accessDoc } from './helpers.mjs';
+import { makeTestEnv, seed, eventDoc, accessDoc, proUsers } from './helpers.mjs';
 
 describe('/events/{eventId}/access/{accessId}', () => {
   let testEnv;
@@ -11,6 +11,9 @@ describe('/events/{eventId}/access/{accessId}', () => {
   before(async () => { testEnv = await makeTestEnv(); });
   after(async () => { await testEnv.cleanup(); });
   beforeEach(async () => { await testEnv.clearFirestore(); });
+  beforeEach(async () => {
+    await seed(testEnv, (db) => proUsers(db, 'alice', 'bob', 'carol', 'mallory'));
+  });
 
   async function seedSharedEvent() {
     await seed(testEnv, async (db) => {
