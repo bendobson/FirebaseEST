@@ -190,6 +190,32 @@ service cloud.firestore {
     }
 
     // ───────────────────────────────────────────────
+    // Crew (decided 28 Oct 2026; Checkpoint Crew Spec in Notion)
+    // ───────────────────────────────────────────────
+    // One doc per person at a checkpoint. Names only: no contact details, so the field list
+    // is closed. Anyone who can read the event sees its crew; writing is Pro, for the owner
+    // as well as an editor (the whole feature is behind the Pro gate, as in the apps).
+    // onLocation / onLocationAt are set by the apps only; the rules can't tell the clients
+    // apart, so that's the planner's own rule, not enforced here.
+    match /events/{eventId}/crew/{crewId} {
+
+      function validCrew(data) {
+        return data.keys().hasOnly(['id', 'personId', 'name', 'checkpointId', 'onLocation', 'onLocationAt'])
+          && data.id == crewId
+          && data.personId is string && data.personId.size() > 0
+          && data.name is string && data.name.size() > 0 && data.name.size() <= 80
+          && (!('checkpointId' in data) || data.checkpointId == null || data.checkpointId is string)
+          && (!('onLocation' in data) || data.onLocation == null || data.onLocation is bool)
+          && (!('onLocationAt' in data) || data.onLocationAt == null || data.onLocationAt is timestamp);
+      }
+
+      allow read: if isSignedIn() && canRead(eventId);
+      allow create, update: if isSignedIn() && canWrite(eventId) && isProUser()
+                            && validCrew(request.resource.data);
+      allow delete: if isSignedIn() && canWrite(eventId) && isProUser();
+    }
+
+    // ───────────────────────────────────────────────
     // Paces
     // ───────────────────────────────────────────────
     match /events/{eventId}/paces/{paceId} {

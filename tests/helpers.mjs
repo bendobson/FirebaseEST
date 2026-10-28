@@ -91,6 +91,17 @@ export function checkpointDoc(overrides = {}) {
   };
 }
 
+/// A crew doc as the planner writes it (one person at one checkpoint).
+export function crewDoc(id, overrides = {}) {
+  return {
+    id,
+    personId: `person-${id}`,
+    name: 'Sam Brown',
+    checkpointId: 'cp1',
+    ...overrides,
+  };
+}
+
 /// Pro user docs for each uid. Shared events, sharing and GPX are Pro in the rules (as in the
 /// apps), so tests about roles make their members Pro; the free cases have their own tests
 /// in audit.test.mjs.
