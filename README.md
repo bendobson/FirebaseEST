@@ -58,6 +58,7 @@ Tests are plain `node --test` — no Jest or Vitest. Layout:
 | `tests/events.test.mjs` | ownership, the viewer/editor split, Pro-only deletion, the free-tier limit |
 | `tests/access.test.mjs` | granting and revoking, and the collection-group query for shared events |
 | `tests/checkpoints.test.mjs` | checkpoints and paces inherit the event's permissions |
+| `tests/crew.test.mjs` | crew: read with the event, write for Pro owners and editors, names only |
 | `tests/storage.test.mjs` | GPX files in Cloud Storage, whose permissions come from Firestore |
 
 `tests/helpers.mjs` holds the fixture document shapes. **Keep them in step with the DTOs** —
