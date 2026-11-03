@@ -9,7 +9,8 @@
     "emulators": "firebase emulators:start --project demo-eventsupporttracker --only firestore",
     "deploy:prod": "firebase deploy --only firestore:rules,firestore:indexes,storage --project prod",
     "audit": "node scripts/firestore-audit.js",
-    "deploy:develop": "firebase deploy --only firestore:rules,firestore:indexes,storage --project develop"
+    "deploy:develop": "firebase deploy --only firestore:rules,firestore:indexes,storage --project develop",
+    "deploy:develop:functions": "firebase deploy --only functions --project develop"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",

@@ -60,8 +60,17 @@ service firebase.storage {
       return /databases/(default)/documents/users/$(request.auth.uid);
     }
 
+    // Pro migration stage 1: RevenueCat's custom claim, or the doc flag during the transition.
+    // Same as isProUser() in firestore.rules; keep the entitlement identifier in step.
+    function hasProClaim() {
+      return ('revenueCatEntitlements' in request.auth.token)
+        && request.auth.token.revenueCatEntitlements is list
+        && 'Event Support Tracker Pro' in request.auth.token.revenueCatEntitlements;
+    }
+
     function isPro() {
-      return firestore.exists(userPath()) && firestore.get(userPath()).data.isProUser == true;
+      return hasProClaim()
+        || (firestore.exists(userPath()) && firestore.get(userPath()).data.isProUser == true);
     }
 
     function canReadEvent(eventId) {

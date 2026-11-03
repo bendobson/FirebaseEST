@@ -1,0 +1,4 @@
+node_modules/
+# Per-project settings (FIRESTORE_REGION) are not secret, but are checked by hand per project.
+# Commit them once they have been read from the Console; never commit .env.*.local or .secret.*.
+*.local
