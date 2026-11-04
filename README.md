@@ -220,7 +220,7 @@ Not here: the planner reading the claim (planner repo), the apps (stage 2), stag
    `europe-west1`, which is inside eur3. The trigger
    must run where the database is: for a regional database use the same region; for a
    multi-region one use the region Firebase's "Cloud Firestore triggers → locations" docs
-   name for it. The deploy refuses to run without this.
+   name for it. It's a deploy-time parameter: without it the CLI stops and asks for a value.
 3. **A RevenueCat project for develop.** Checked 4 Nov 2026: there is one RevenueCat project.
    It holds the Play, App Store and Web Billing apps and the debug builds' Test Store key, and
    it has no integrations. A Firebase integration covers a whole project, so develop gets a

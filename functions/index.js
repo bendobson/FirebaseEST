@@ -7,6 +7,7 @@
  * Deploy only with an explicit project: `npm run deploy:develop:functions`.
  */
 const { onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { defineString } = require('firebase-functions/params');
 const { logger } = require('firebase-functions');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
@@ -14,17 +15,17 @@ const { ownersToRecount, recountOwnedEvents } = require('./counts');
 
 initializeApp();
 
-// A Firestore trigger has to run in the database's own location. That isn't recorded anywhere
-// in these repos, so it is set per project in functions/.env.<alias> (FIRESTORE_REGION=...),
-// read from the Console (Firestore → Database → Location). No default: guessing wrong fails the
-// deploy at best.
-const region = process.env.FIRESTORE_REGION;
-if (!region && process.env.FUNCTIONS_EMULATOR !== 'true') {
-  throw new Error('FIRESTORE_REGION is not set: add it to functions/.env.<project alias>');
-}
+// A Firestore trigger has to run where the database is. That differs per project, so it is a
+// deploy-time parameter read from functions/.env.<alias> (FIRESTORE_REGION=...). It has no
+// default: if the file doesn't set it, the CLI stops and asks rather than guessing. (A plain
+// process.env read doesn't work here: .env values aren't loaded while the CLI analyses the code.)
+const firestoreRegion = defineString('FIRESTORE_REGION', {
+  description: "Region for the Firestore trigger: the database's region, or for a multi-region " +
+    'database a region inside it (eur3 → europe-west1).',
+});
 
 exports.recountOwnedEvents = onDocumentWritten(
-  { document: 'events/{eventId}', region: region || 'europe-west2' },
+  { document: 'events/{eventId}', region: firestoreRegion },
   async (event) => {
     const before = event.data && event.data.before.exists ? event.data.before.data() : null;
     const after = event.data && event.data.after.exists ? event.data.after.data() : null;
