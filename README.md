@@ -215,7 +215,9 @@ Not here: the planner reading the claim (planner repo), the apps (stage 2), stag
 
 1. **Blaze plan.** Extensions and functions need it. Check est-develop is on Blaze.
 2. **Function region.** In the Console, read est-develop's Firestore location (Firestore →
-   Database). Create `functions/.env.develop` with `FIRESTORE_REGION=<region>`. The trigger
+   Database). Create `functions/.env.develop` with `FIRESTORE_REGION=<region>`.
+   **Done for est-develop:** its database is `eur3` (multi-region Europe), so the file says
+   `europe-west1`, which is inside eur3. The trigger
    must run where the database is: for a regional database use the same region; for a
    multi-region one use the region Firebase's "Cloud Firestore triggers → locations" docs
    name for it. The deploy refuses to run without this.
