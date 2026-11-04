@@ -240,9 +240,11 @@ Not here: the planner reading the claim (planner repo), the apps (stage 2), stag
      `isProUser`.
 4. **RevenueCat extension.** Install "Enable In-App Purchases with RevenueCat"
    (`revenuecat/firestore-revenuecat-purchases`) on est-develop, from the Console's
-   Extensions page. Settings: custom claims **enabled**; give the customers and events
-   collections names with no rule here (for example `revenuecat_customers`,
-   `revenuecat_events`), so no client can read them; same location as the database.
+   Extensions page. Settings: location `europe-west1`; custom claims **enabled**; leave the
+   events collection, the customers collection and "Enable Events" **empty/off**. Only the
+   claim is used, so no RevenueCat data is stored in Firestore. (If a collection is ever
+   wanted, give it a name with no rule here, e.g. `revenuecat_customers`, so no client can
+   read it.)
    Then, in the **develop** RevenueCat project, add the extension's URL and shared secret
    under Integrations → Firebase. Test Store purchases are sandbox events, so allow sandbox
    events if the integration offers the choice.
