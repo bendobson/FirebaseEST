@@ -249,7 +249,12 @@ Not here: the planner reading the claim (planner repo), the apps (stage 2), stag
    under Integrations → Firebase. Test Store purchases are sandbox events, so allow sandbox
    events if the integration offers the choice.
 5. **Deploy:** `npm run deploy:develop` (rules), then `npm run deploy:develop:functions`.
+   The first 2nd-gen deploy can fail with "Permission denied while using the Eventarc Service
+   Agent": wait a few minutes and deploy again. Then stop old build images piling up:
+   `firebase functions:artifacts:setpolicy --project develop --location europe-west1`.
 6. **Backfill:** `node scripts/backfill-owned-event-counts.js --key <est-develop key>`
+   (the key: Console → est-develop → Project settings → Service accounts → Generate new
+   private key; keep it outside the repo; the script refuses any other project's key)
    (dry run), then again with `--confirm`.
 7. **Check:**
    - Grant a develop user Pro in the develop RevenueCat project. After a token refresh, their ID token claims

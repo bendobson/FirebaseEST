@@ -25,7 +25,14 @@ if (keyFlag === -1 || !args[keyFlag + 1]) {
 }
 const confirmed = args.includes("--confirm");
 
-admin.initializeApp({ credential: admin.credential.cert(require(path.resolve(args[keyFlag + 1]))) });
+const key = require(path.resolve(args[keyFlag + 1]));
+// Stage 1 is on est-develop only. Live gets its backfill when stage 1 goes live, and this guard
+// comes out then, deliberately.
+if (key.project_id !== "est-develop") {
+  console.error(`This key is for "${key.project_id}". Stage 1 is develop-only: use an est-develop key.`);
+  process.exit(1);
+}
+admin.initializeApp({ credential: admin.credential.cert(key) });
 const db = admin.firestore();
 
 async function main() {
@@ -43,7 +50,7 @@ async function main() {
     if (stored !== actual) changes.push({ uid: d.id, stored, actual });
   });
 
-  console.log(`project:         ${admin.app().options.credential.projectId || "(from key)"}`);
+  console.log(`project:         ${key.project_id}`);
   console.log(`user documents:  ${users.size}`);
   console.log(`events:          ${events.size}`);
   console.log(`needing a value: ${changes.length}\n`);
