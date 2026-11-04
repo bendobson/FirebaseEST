@@ -219,21 +219,36 @@ Not here: the planner reading the claim (planner repo), the apps (stage 2), stag
    must run where the database is: for a regional database use the same region; for a
    multi-region one use the region Firebase's "Cloud Firestore triggers → locations" docs
    name for it. The deploy refuses to run without this.
-3. **RevenueCat extension.** Install "Enable In-App Purchases with RevenueCat"
+3. **A RevenueCat project for develop.** Checked 4 Nov 2026: there is one RevenueCat project.
+   It holds the Play, App Store and Web Billing apps and the debug builds' Test Store key, and
+   it has no integrations. A Firebase integration covers a whole project, so develop gets a
+   project of its own and the live project is left alone (it is connected to live Firebase
+   when stage 1 goes live).
+   - Create a new RevenueCat project, e.g. "Event Support Tracker (develop)". **Do not**
+     touch the live project's apps or Web Billing config (the `rc-5f225a7f21` redemption
+     scheme comes from it).
+   - In it, add a **Test Store** app only. Create the entitlement with the identical
+     identifier `Event Support Tracker Pro`, Test Store products for it, and a current
+     offering, so the debug paywall has something to show.
+   - Put the new `test_` key into the debug builds: Android `local.properties`
+     `REVENUECAT_API_KEY_DEBUG` (back the file up first: it is gitignored), and the iOS
+     debug configuration. Release keys don't change.
+   - Develop accounts that were Pro through the old project aren't Pro in the new one.
+     Re-grant them (promotional entitlement), then sign in again so the apps rewrite
+     `isProUser`.
+4. **RevenueCat extension.** Install "Enable In-App Purchases with RevenueCat"
    (`revenuecat/firestore-revenuecat-purchases`) on est-develop, from the Console's
    Extensions page. Settings: custom claims **enabled**; give the customers and events
    collections names with no rule here (for example `revenuecat_customers`,
    `revenuecat_events`), so no client can read them; same location as the database.
-   Then add the extension's URL and shared secret in RevenueCat → Integrations → Firebase.
-   ⚠️ **Check first:** one RevenueCat project serves both develop and live. If RevenueCat
-   allows only one Firebase integration per project, pointing it at develop means live gets
-   no claims until it is moved, and the sandbox/production event filter matters. Decide
-   before connecting it.
-4. **Deploy:** `npm run deploy:develop` (rules), then `npm run deploy:develop:functions`.
-5. **Backfill:** `node scripts/backfill-owned-event-counts.js --key <est-develop key>`
+   Then, in the **develop** RevenueCat project, add the extension's URL and shared secret
+   under Integrations → Firebase. Test Store purchases are sandbox events, so allow sandbox
+   events if the integration offers the choice.
+5. **Deploy:** `npm run deploy:develop` (rules), then `npm run deploy:develop:functions`.
+6. **Backfill:** `node scripts/backfill-owned-event-counts.js --key <est-develop key>`
    (dry run), then again with `--confirm`.
-6. **Check:**
-   - Grant a develop user Pro in RevenueCat. After a token refresh, their ID token claims
+7. **Check:**
+   - Grant a develop user Pro in the develop RevenueCat project. After a token refresh, their ID token claims
      include `revenueCatEntitlements: ["Event Support Tracker Pro"]`. **Confirm the claim's
      name and contents here: the rules assume them.**
    - Create and delete an event. `ownedEventCount` follows, and the function logs show
