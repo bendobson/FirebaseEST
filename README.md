@@ -230,7 +230,8 @@ Not here: the planner reading the claim (planner repo), the apps (stage 2), stag
      touch the live project's apps or Web Billing config (the `rc-5f225a7f21` redemption
      scheme comes from it).
    - In it, add a **Test Store** app only. Create the entitlement with the identical
-     identifier `Event Support Tracker Pro`, Test Store products for it, and a current
+     **identifier** `Event Support Tracker Pro` (not a slug like `event_support_tracker_pro`:
+     the identifier can't be renamed later, and it's what both the apps and the claim use), Test Store products for it, and a current
      offering, so the debug paywall has something to show.
    - Put the new `test_` key into the debug builds: Android `local.properties`
      `REVENUECAT_API_KEY_DEBUG` (back the file up first: it is gitignored), and the iOS
@@ -258,8 +259,9 @@ Not here: the planner reading the claim (planner repo), the apps (stage 2), stag
    (dry run), then again with `--confirm`.
 7. **Check:**
    - Grant a develop user Pro in the develop RevenueCat project. After a token refresh, their ID token claims
-     include `revenueCatEntitlements: ["Event Support Tracker Pro"]`. **Confirm the claim's
-     name and contents here: the rules assume them.**
+     include `revenueCatEntitlements: ["Event Support Tracker Pro"]`. **Confirmed on
+     est-develop, 4 Nov 2026:** the claim is a list of entitlement identifiers, set within
+     seconds of the grant (plus `revenueCatEventTimestampMs`).
    - Create and delete an event. `ownedEventCount` follows, and the function logs show
      `ownedEventCount`.
 
