@@ -25,13 +25,40 @@ npm run deploy:develop       # est-develop: testers, the develop app builds and 
 npm run deploy:prod          # eventtracker-a150e: live
 ```
 
-Both deploy Firestore rules, Firestore indexes and Storage rules, so the two projects stay
-identical. Deploy to develop first, test with the develop builds, then live.
+Both deploy Firestore rules, Firestore indexes and Storage rules. Deploy to develop first,
+test with the develop builds, then live.
 
 Never `firebase deploy` without `--project`, and never assume the working tree matches
 what is live: until this repo existed, the rules lived **only in the Firebase Console**, so
 the Console is still the authority for anything not yet committed here. Check before
 deploying.
+
+### `main` is ahead of live (since 4 Nov 2026)
+
+`main` is what develop runs, **not** what live runs. Not yet on live:
+
+| Change | PR | On develop | On live |
+|---|---|---|---|
+| Crew rules (`events/{id}/crew`) | #2 | yes | no |
+| Pro migration stage 1, rules: Pro from the claim **or** the flag; `ownedEventCount` server-only | #3 | yes, 4 Nov 2026 | no |
+| Stage 1, the rest: `recountOwnedEvents` function, RevenueCat extension, backfill | #3 | yes, 4 Nov 2026 | no |
+
+So **don't run `npm run deploy:prod` to ship some other fix**: it would take the rules in the
+first two rows to live as well. They are safe for the shipped apps (the flag still makes users
+Pro, no app writes `ownedEventCount`, only the planner and 1.13.0 apps use crew), but switching
+them on is a planned step, not a side effect. An urgent live-only fix goes on a branch from the
+rules live actually runs (compare with the Console first), not from `main`.
+
+Turning stage 1 on for live is its own day:
+1. Install the RevenueCat extension on `eventtracker-a150e` and connect it in the **live**
+   RevenueCat project (Integrations → Firebase). Same settings as develop.
+2. `functions/.env.prod` with live's Firestore region (develop: `eur3` → `europe-west1`).
+3. `npm run deploy:prod`, then `firebase deploy --only functions --project prod`, then the
+   image clean-up policy (`firebase functions:artifacts:setpolicy --project prod`).
+4. Lift the backfill script's develop-only guard (deliberately, in a commit), and backfill.
+5. Grant a test account and check its claim, as on develop.
+
+Update the table when something reaches live, and delete this section once the two match.
 
 ## Running the tests
 
@@ -188,7 +215,7 @@ Distances are canonical **metres** and paces **seconds per kilometre** as of sch
 legacy display-unit fields are still written alongside them until Android ships its own v2
 update. See the iOS repo's `CLAUDE.md` for the full migration story.
 
-## Pro migration, stage 1 (drafted 3 Nov 2026, not deployed anywhere)
+## Pro migration, stage 1 (drafted 3 Nov 2026; on est-develop since 4 Nov, not live)
 
 Notion: "Move Pro status and event count server-side, and add App Check". Today any signed-in
 user can write their own `isProUser` and `eventCount`, and the rules trust both. Stage 1 adds
