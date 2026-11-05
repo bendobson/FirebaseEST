@@ -26,12 +26,14 @@ if (keyFlag === -1 || !args[keyFlag + 1]) {
 const confirmed = args.includes("--confirm");
 
 const key = require(path.resolve(args[keyFlag + 1]));
-// Stage 1 is on est-develop only. Live gets its backfill when stage 1 goes live, and this guard
-// comes out then, deliberately.
-if (key.project_id !== "est-develop") {
-  console.error(`This key is for "${key.project_id}". Stage 1 is develop-only: use an est-develop key.`);
+// Only the two real projects, and only once each has the recountOwnedEvents function deployed.
+// Live was added on 5 Nov 2026, when stage 1 went live.
+const STAGE_1_PROJECTS = ["est-develop", "eventtracker-a150e"];
+if (!STAGE_1_PROJECTS.includes(key.project_id)) {
+  console.error(`This key is for "${key.project_id}". Stage 1 runs on ${STAGE_1_PROJECTS.join(" and ")} only.`);
   process.exit(1);
 }
+console.log(`Project: ${key.project_id}`);
 admin.initializeApp({ credential: admin.credential.cert(key) });
 const db = admin.firestore();
 
