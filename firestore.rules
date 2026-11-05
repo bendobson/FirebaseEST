@@ -18,8 +18,22 @@ service cloud.firestore {
       return userDoc().data != null;
     }
 
+    // Pro migration, stage 1 (Notion: "Move Pro status and event count server-side"). Pro is
+    // RevenueCat's custom claim, set by the RevenueCat Firebase extension from the user's active
+    // entitlements, OR the users/{uid}.isProUser flag the apps still write. Stage 3 drops the
+    // flag, once every app reads the claim and none writes the flag.
+    // The claim is checked first: it's in the token, so it costs no document read.
+    // PRO_ENTITLEMENT is the RevenueCat entitlement identifier (RevenueCatSubscriptionManager.kt,
+    // SubscriptionManager.swift); keep it in step with storage.rules.
+    function hasProClaim() {
+      return request.auth != null
+        && ('revenueCatEntitlements' in request.auth.token)
+        && request.auth.token.revenueCatEntitlements is list
+        && 'Event Support Tracker Pro' in request.auth.token.revenueCatEntitlements;
+    }
+
     function isProUser() {
-      return hasUserDoc() && userDoc().data.isProUser == true;
+      return hasProClaim() || (hasUserDoc() && userDoc().data.isProUser == true);
     }
 
     function userEventCount() {
@@ -71,15 +85,21 @@ service cloud.firestore {
       // - Doc must NOT already exist (prevents overwriting)
       allow create: if isSignedIn()
                     && request.auth.uid == uid
-                    && !exists(/databases/$(database)/documents/users/$(uid));
+                    && !exists(/databases/$(database)/documents/users/$(uid))
+                    && !('ownedEventCount' in request.resource.data);
 
       // Update:
       // - Must be signed in
       // - Must be updating their own doc
       // - Doc must already exist (prevents accidental create-via-update)
+      // ownedEventCount is written only by the server (functions/, Pro migration stage 1), so
+      // no client may set or change it. No app writes it, so this refuses nothing they do today;
+      // it means the field can be trusted when stage 3's free-tier rule starts reading it.
+      // (isProUser and eventCount stay client-writable until stage 3.)
       allow update: if isSignedIn()
                     && request.auth.uid == uid
-                    && exists(/databases/$(database)/documents/users/$(uid));
+                    && exists(/databases/$(database)/documents/users/$(uid))
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownedEventCount']);
 
       // Delete:
       // - User may delete their own profile

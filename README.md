@@ -25,13 +25,40 @@ npm run deploy:develop       # est-develop: testers, the develop app builds and 
 npm run deploy:prod          # eventtracker-a150e: live
 ```
 
-Both deploy Firestore rules, Firestore indexes and Storage rules, so the two projects stay
-identical. Deploy to develop first, test with the develop builds, then live.
+Both deploy Firestore rules, Firestore indexes and Storage rules. Deploy to develop first,
+test with the develop builds, then live.
 
 Never `firebase deploy` without `--project`, and never assume the working tree matches
 what is live: until this repo existed, the rules lived **only in the Firebase Console**, so
 the Console is still the authority for anything not yet committed here. Check before
 deploying.
+
+### `main` is ahead of live (since 4 Nov 2026)
+
+`main` is what develop runs, **not** what live runs. Not yet on live:
+
+| Change | PR | On develop | On live |
+|---|---|---|---|
+| Crew rules (`events/{id}/crew`) | #2 | yes | no |
+| Pro migration stage 1, rules: Pro from the claim **or** the flag; `ownedEventCount` server-only | #3 | yes, 4 Nov 2026 | no |
+| Stage 1, the rest: `recountOwnedEvents` function, RevenueCat extension, backfill | #3 | yes, 4 Nov 2026 | no |
+
+So **don't run `npm run deploy:prod` to ship some other fix**: it would take the rules in the
+first two rows to live as well. They are safe for the shipped apps (the flag still makes users
+Pro, no app writes `ownedEventCount`, only the planner and 1.13.0 apps use crew), but switching
+them on is a planned step, not a side effect. An urgent live-only fix goes on a branch from the
+rules live actually runs (compare with the Console first), not from `main`.
+
+Turning stage 1 on for live is its own day:
+1. Install the RevenueCat extension on `eventtracker-a150e` and connect it in the **live**
+   RevenueCat project (Integrations → Firebase). Same settings as develop.
+2. `functions/.env.prod` with live's Firestore region (develop: `eur3` → `europe-west1`).
+3. `npm run deploy:prod`, then `firebase deploy --only functions --project prod`, then the
+   image clean-up policy (`firebase functions:artifacts:setpolicy --project prod`).
+4. Lift the backfill script's develop-only guard (deliberately, in a commit), and backfill.
+5. Grant a test account and check its claim, as on develop.
+
+Update the table when something reaches live, and delete this section once the two match.
 
 ## Running the tests
 
@@ -59,6 +86,8 @@ Tests are plain `node --test` — no Jest or Vitest. Layout:
 | `tests/access.test.mjs` | granting and revoking, and the collection-group query for shared events |
 | `tests/checkpoints.test.mjs` | checkpoints and paces inherit the event's permissions |
 | `tests/crew.test.mjs` | crew: read with the event, write for Pro owners and editors, names only |
+| `tests/pro-claim.test.mjs` | Pro from RevenueCat's claim or the doc flag; `ownedEventCount` is server-only |
+| `tests/owned-event-count.test.mjs` | the server's event count (`functions/counts.js`), against the emulator |
 | `tests/storage.test.mjs` | GPX files in Cloud Storage, whose permissions come from Firestore |
 
 `tests/helpers.mjs` holds the fixture document shapes. **Keep them in step with the DTOs** —
@@ -87,6 +116,7 @@ the security rules entirely.
 | `scripts/firestore-audit.js` | Reports Auth users, their documents and events, and the three kinds of debris: throwaway guests, orphan events, orphan user documents. Flags for cleaning each. |
 | `scripts/migrate-roles.js` | Rewrites access-document roles as canonical tokens. See "Roles" below. |
 | `scripts/reconcile-event-counts.js` | Sets each user's `eventCount` to the events they actually own. |
+| `scripts/backfill-owned-event-counts.js` | Sets `ownedEventCount` for every existing user, once, after the function is deployed. |
 | `scripts/export-users.js` | Email/name export of registered users. Output is personal data — gitignored. |
 
 Debris the audit looks for, and why each exists:
@@ -174,6 +204,7 @@ one users meet; the server limit is the only one an attacker has to beat. Pick o
 
 ```
 users/{uid}                                  profile; uid == Firebase Auth uid
+                                             ownedEventCount: server-written (functions/), never by a client
 events/{eventId}                             ownerUserId is the authority for ownership
 events/{eventId}/access/{uid}                id field == uid (the collection-group query needs it)
 events/{eventId}/checkpoints/{detailId}
@@ -183,3 +214,83 @@ events/{eventId}/paces/{paceId}
 Distances are canonical **metres** and paces **seconds per kilometre** as of schema v2; the
 legacy display-unit fields are still written alongside them until Android ships its own v2
 update. See the iOS repo's `CLAUDE.md` for the full migration story.
+
+## Pro migration, stage 1 (drafted 3 Nov 2026; on est-develop since 4 Nov, not live)
+
+Notion: "Move Pro status and event count server-side, and add App Check". Today any signed-in
+user can write their own `isProUser` and `eventCount`, and the rules trust both. Stage 1 adds
+the server-side sources **without changing any app**; stage 2 (the 1.13.0 apps) reads them;
+stage 3 removes the client-written ones.
+
+What's in this repo:
+
+- **Rules:** `isProUser()` (firestore.rules) and `isPro()` (storage.rules) are true for
+  RevenueCat's custom claim **or** the doc flag. The claim is the extension's
+  `revenueCatEntitlements` list containing the entitlement identifier
+  `Event Support Tracker Pro` (as in both apps). Clients may no longer set or change
+  `users/{uid}.ownedEventCount`. No app writes it, so nothing they do is refused.
+- **`functions/`:** one Firestore trigger, `recountOwnedEvents`, on `events/{eventId}`. On a
+  create, a delete or an `ownerUserId` change it recounts the owner's events into
+  `users/{uid}.ownedEventCount`. That's a new field, so it never double-counts with the apps'
+  `eventCount`. Ordinary edits cost nothing. It never creates a user doc.
+- **`scripts/backfill-owned-event-counts.js`:** fills the field in for existing users.
+- Tests for all of it (`npm test`; the trigger's logic runs against the Firestore emulator).
+
+Not here: the planner reading the claim (planner repo), the apps (stage 2), stage 3's rules.
+
+### Turning it on for est-develop (Ben; develop only)
+
+1. **Blaze plan.** Extensions and functions need it. Check est-develop is on Blaze.
+2. **Function region.** In the Console, read est-develop's Firestore location (Firestore →
+   Database). Create `functions/.env.develop` with `FIRESTORE_REGION=<region>`.
+   **Done for est-develop:** its database is `eur3` (multi-region Europe), so the file says
+   `europe-west1`, which is inside eur3. The trigger
+   must run where the database is: for a regional database use the same region; for a
+   multi-region one use the region Firebase's "Cloud Firestore triggers → locations" docs
+   name for it. It's a deploy-time parameter: without it the CLI stops and asks for a value.
+3. **A RevenueCat project for develop.** Checked 4 Nov 2026: there is one RevenueCat project.
+   It holds the Play, App Store and Web Billing apps and the debug builds' Test Store key, and
+   it has no integrations. A Firebase integration covers a whole project, so develop gets a
+   project of its own and the live project is left alone (it is connected to live Firebase
+   when stage 1 goes live).
+   - Create a new RevenueCat project, e.g. "Event Support Tracker (develop)". **Do not**
+     touch the live project's apps or Web Billing config (the `rc-5f225a7f21` redemption
+     scheme comes from it).
+   - In it, add a **Test Store** app only. Create the entitlement with the identical
+     **identifier** `Event Support Tracker Pro` (not a slug like `event_support_tracker_pro`:
+     the identifier can't be renamed later, and it's what both the apps and the claim use), Test Store products for it, and a current
+     offering, so the debug paywall has something to show.
+   - Put the new `test_` key into the debug builds: Android `local.properties`
+     `REVENUECAT_API_KEY_DEBUG` (back the file up first: it is gitignored), and the iOS
+     debug configuration. Release keys don't change.
+   - Develop accounts that were Pro through the old project aren't Pro in the new one.
+     Re-grant them (promotional entitlement), then sign in again so the apps rewrite
+     `isProUser`.
+4. **RevenueCat extension.** Install "Enable In-App Purchases with RevenueCat"
+   (`revenuecat/firestore-revenuecat-purchases`) on est-develop, from the Console's
+   Extensions page. Settings: location `europe-west1`; custom claims **enabled**; leave the
+   events collection, the customers collection and "Enable Events" **empty/off**. Only the
+   claim is used, so no RevenueCat data is stored in Firestore. (If a collection is ever
+   wanted, give it a name with no rule here, e.g. `revenuecat_customers`, so no client can
+   read it.)
+   Then, in the **develop** RevenueCat project, add the extension's URL and shared secret
+   under Integrations → Firebase. Test Store purchases are sandbox events, so allow sandbox
+   events if the integration offers the choice.
+5. **Deploy:** `npm run deploy:develop` (rules), then `npm run deploy:develop:functions`.
+   The first 2nd-gen deploy can fail with "Permission denied while using the Eventarc Service
+   Agent": wait a few minutes and deploy again. Then stop old build images piling up:
+   `firebase functions:artifacts:setpolicy --project develop --location europe-west1`.
+6. **Backfill:** `node scripts/backfill-owned-event-counts.js --key <est-develop key>`
+   (the key: Console → est-develop → Project settings → Service accounts → Generate new
+   private key; keep it outside the repo; the script refuses any other project's key)
+   (dry run), then again with `--confirm`.
+7. **Check:**
+   - Grant a develop user Pro in the develop RevenueCat project. After a token refresh, their ID token claims
+     include `revenueCatEntitlements: ["Event Support Tracker Pro"]`. **Confirmed on
+     est-develop, 4 Nov 2026:** the claim is a list of entitlement identifiers, set within
+     seconds of the grant (plus `revenueCatEventTimestampMs`).
+   - Create and delete an event. `ownedEventCount` follows, and the function logs show
+     `ownedEventCount`.
+
+A claim reaches a client only when its ID token refreshes (up to an hour, or forced). The
+apps force a refresh after a purchase from stage 2. Until then the doc flag keeps them working.
