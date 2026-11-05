@@ -33,32 +33,33 @@ what is live: until this repo existed, the rules lived **only in the Firebase Co
 the Console is still the authority for anything not yet committed here. Check before
 deploying.
 
-### `main` is ahead of live (since 4 Nov 2026)
+### `main` and live match (since 5 Nov 2026)
 
-`main` is what develop runs, **not** what live runs. Not yet on live:
+Live (`eventtracker-a150e`) now runs what `main` holds: the audited rules, crew (#2), and Pro
+migration stage 1 (#3): rules, the `recountOwnedEvents` function, the RevenueCat extension and the
+`ownedEventCount` backfill. Before the deploy, live's rules were compared with the repo: they were
+exactly `118ef96` (Firestore) and `3897872` (Storage), so nothing existed only in the Console.
 
-| Change | PR | On develop | On live |
-|---|---|---|---|
-| Crew rules (`events/{id}/crew`) | #2 | yes | no |
-| Pro migration stage 1, rules: Pro from the claim **or** the flag; `ownedEventCount` server-only | #3 | yes, 4 Nov 2026 | no |
-| Stage 1, the rest: `recountOwnedEvents` function, RevenueCat extension, backfill | #3 | yes, 4 Nov 2026 | no |
+Checked on live, 5 Nov 2026: the Pro claim on a promotional grant; `ownedEventCount` following a
+create and a delete; a shared event and a GPX route opening on the live 1.12.x app. Data first:
+`reconcile-event-counts.js` (15 users, 3 free users unblocked) and `migrate-roles.js` (6 docs,
+case only).
 
-So **don't run `npm run deploy:prod` to ship some other fix**: it would take the rules in the
-first two rows to live as well. They are safe for the shipped apps (the flag still makes users
-Pro, no app writes `ownedEventCount`, only the planner and 1.13.0 apps use crew), but switching
-them on is a planned step, not a side effect. An urgent live-only fix goes on a branch from the
-rules live actually runs (compare with the Console first), not from `main`.
+What the live go-live taught, for next time:
+- Deploy rules with `firebase deploy --only firestore:rules,storage --project prod` when the
+  indexes haven't been compared with live; `npm run deploy:prod` includes them.
+- The first 2nd-gen functions deploy fails with the Eventarc service-agent error; retry after a
+  few minutes. The deploy also offers the image clean-up policy (1 day).
+- For about half an hour after the extension is installed, RevenueCat sends the old API version
+  (`InvalidApiVersionError: 0.1.19 vs 0.1.18`) and its deliveries retry. They go through once
+  RevenueCat catches up; nothing needs changing.
+- The extension sets a claim only when RevenueCat sends an event. Subscribers from before 5 Nov
+  2026 have no claim until their next renewal, so stage 3 (dropping the `isProUser` flag) waits
+  for that, or for a script that sets their claims first.
+- The Firebase Extensions service shuts down on 31 March 2027: move the claim to a function kit
+  or our own function before then (Notion task, due 1 Feb 2027).
 
-Turning stage 1 on for live is its own day:
-1. Install the RevenueCat extension on `eventtracker-a150e` and connect it in the **live**
-   RevenueCat project (Integrations → Firebase). Same settings as develop.
-2. `functions/.env.prod` with live's Firestore region (develop: `eur3` → `europe-west1`).
-3. `npm run deploy:prod`, then `firebase deploy --only functions --project prod`, then the
-   image clean-up policy (`firebase functions:artifacts:setpolicy --project prod`).
-4. Lift the backfill script's develop-only guard (deliberately, in a commit), and backfill.
-5. Grant a test account and check its claim, as on develop.
-
-Update the table when something reaches live, and delete this section once the two match.
+From now on, a change reaches live through the usual path: develop first, then live.
 
 ## Running the tests
 
