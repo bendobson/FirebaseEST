@@ -107,6 +107,34 @@ service cloud.firestore {
     }
 
     // ───────────────────────────────────────────────
+    // User directory (1.13.0 apps; Bug Tracker, High: invite search exposed every visible
+    // user's email and phone)
+    // ───────────────────────────────────────────────
+    // What invite search may see of someone else: their username, nothing more. Each user keeps
+    // their own entry while their profile is visible. The `list` on /users above is what the
+    // apps used before; it goes once the 1.13.0 apps (both) are the oldest in use, closing the
+    // profiles to everyone but their owner.
+    match /userDirectory/{uid} {
+      allow read: if isSignedIn();
+
+      // Your own entry only; just id and username; the username must be your profile's, and
+      // your profile must be visible (so nobody lists themselves under someone else's name).
+      allow create, update: if isSignedIn()
+                            && request.auth.uid == uid
+                            && request.resource.data.keys().hasOnly(['id', 'username'])
+                            && request.resource.data.id == uid
+                            && request.resource.data.username is string
+                            && request.resource.data.username.size() > 0
+                            && request.resource.data.username.size() <= 80
+                            && exists(/databases/$(database)/documents/users/$(uid))
+                            && get(/databases/$(database)/documents/users/$(uid)).data.profileVisible == true
+                            && get(/databases/$(database)/documents/users/$(uid)).data.username
+                               == request.resource.data.username;
+
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ───────────────────────────────────────────────
     // Events
     // ───────────────────────────────────────────────
 
