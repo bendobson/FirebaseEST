@@ -83,7 +83,7 @@ describe('Pro from the RevenueCat claim, or the doc flag', () => {
   // ─── The free-tier create limit ─────────────────────────────────────────────
 
   it('the claim lifts the one-event limit', async () => {
-    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ eventCount: 1 })));
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ ownedEventCount: 1 })));
     await assertSucceeds(setDoc(doc(as('alice', proClaim), 'events/evt2'), eventDoc('alice')));
     await assertFails(setDoc(doc(as('alice'), 'events/evt3'), eventDoc('alice')));
   });
