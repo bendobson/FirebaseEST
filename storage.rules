@@ -12,6 +12,15 @@ rules_version = '2';
 // Note these rules cost a Firestore document read (sometimes two) per storage operation.
 // That's the price of not duplicating the access model, and GPX operations are rare — one
 // upload per import, one download per viewer.
+//
+// THE TWO-DOCUMENT LIMIT. "No more than two Firestore documents may be accessed in a single
+// Rules evaluation." Going over is an error, so the request is refused, and the emulator does
+// NOT enforce it: the tests passed while live refused shared users whose Pro was only the
+// users/{uid} flag (events + access + users = 3; 12 Nov 2026). Reading one document twice
+// (exists then get) counts once. Today: an owner reads events (+ users without the claim); a
+// shared user reads events + access, so they need the RevenueCat claim, which
+// scripts/backfill-pro-claims.js sets for every subscriber. Any new condition must fit the
+// budget; check it on est-develop with scripts/probe-storage-budget.js, not the emulator.
 
 service firebase.storage {
   match /b/{bucket}/o {

@@ -61,6 +61,45 @@ What the live go-live taught, for next time:
 
 From now on, a change reaches live through the usual path: develop first, then live.
 
+**12 Nov 2026: `userDirectory` (#4) on live.** Live's Firestore rules were compared with `main`
+first (`850f67e`): identical apart from a trailing newline. `npm run deploy:prod` released the
+rules; Storage was "already up to date" and the indexes were unchanged. Then
+`backfill-user-directory.js` (dry run, then `--confirm`): 28 visible profiles listed. The `list`
+rule on `/users` is still open: it closes once Android 1.13.0 searches the directory too, since
+Android 1.13.0 (8) still searches `/users`.
+
+**12 Nov 2026: Storage's two-document limit, and the Pro claim backfill.** A shared editor on
+live got a 403 for a route on every app version. Storage rules may touch **at most two
+Firestore documents per request**; for a shared user whose Pro was only the `users/{uid}` flag,
+`gpx/` read needed three (event, access, user), so the request errored and was refused. The
+emulator does not enforce the limit: `lets a viewer read the route` is exactly that case and
+passes. Proven on the real server with `scripts/probe-storage-budget.js` (est-develop only):
+flag only, 403; `--claim`, 200. Reading one document twice counts once.
+
+The fix is the claim, not a rules change. With `revenueCatEntitlements` in the token, `isPro()`
+never reads `users/{uid}`: an owner reads the event, a shared user the event and their access
+doc. A reorder that read the access doc first was tried and dropped: 22 of 42 live events have
+no access doc for their owner (Android, 1.12.x and 1.13.0, never writes one; iOS does), so
+those owners would have gone over instead. `scripts/check-owner-access.js` (read-only) found
+that, plus one false `owner` role (JCW D2) and three orphaned access docs, all on the
+data-repair list.
+
+`scripts/backfill-pro-claims.js` sets the claim from RevenueCat's API (a secret `sk_` key, read
+from a file) for every user with the flag or a claim; only those, because RevenueCat's v1
+`GET /subscribers` creates a customer for an unknown id. Run on live 12 Nov 2026: 6 asked
+about, 2 set (pre-extension subscribers), 4 already right, 2 stale flags (not subscribed) left
+without a claim. est-develop: nothing to change. Rerun it before Pro stage 3; it changes
+nothing when everything is right. Any new Storage rule condition must stay within two
+documents: check it with the probe, not the emulator.
+
+**13 Nov 2026: live's test accounts deleted.** Testing has moved to est-develop, so the four
+scratch accounts on live went with `scripts/delete-users.js` (new): 4 Auth users with their
+`users` and `userDirectory` docs and RevenueCat customers, the 12 events they owned plus a
+guest's test event "xx", 6 GPX files, 2 access docs on surviving events and 3 orphaned ones.
+That clears the data-repair list from 12 Nov: the false `owner` role was on JCW D2 (deleted)
+and the three orphaned access docs are gone. Live now holds 29 events and 1 GPX file. The run
+was a dry run first, then `--confirm`, with the real account passed as `--protect`.
+
 ## Running the tests
 
 ```bash
@@ -119,6 +158,7 @@ the security rules entirely.
 | `scripts/reconcile-event-counts.js` | Sets each user's `eventCount` to the events they actually own. |
 | `scripts/backfill-owned-event-counts.js` | Sets `ownedEventCount` for every existing user, once, after the function is deployed. |
 | `scripts/export-users.js` | Email/name export of registered users. Output is personal data — gitignored. |
+| `scripts/delete-users.js` | Deletes users outright: their events (GPX first, then every subcollection), their access on other events, `users`/`userDirectory`, RevenueCat customer (`--rc-key-file`) and Auth user. `--event`, `--orphan-access`, `--protect`. Prints who else loses an event before anything goes. |
 
 Debris the audit looks for, and why each exists:
 
