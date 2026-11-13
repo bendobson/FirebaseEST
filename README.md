@@ -92,6 +92,14 @@ without a claim. est-develop: nothing to change. Rerun it before Pro stage 3; it
 nothing when everything is right. Any new Storage rule condition must stay within two
 documents: check it with the probe, not the emulator.
 
+**13 Nov 2026: live's test accounts deleted.** Testing has moved to est-develop, so the four
+scratch accounts on live went with `scripts/delete-users.js` (new): 4 Auth users with their
+`users` and `userDirectory` docs and RevenueCat customers, the 12 events they owned plus a
+guest's test event "xx", 6 GPX files, 2 access docs on surviving events and 3 orphaned ones.
+That clears the data-repair list from 12 Nov: the false `owner` role was on JCW D2 (deleted)
+and the three orphaned access docs are gone. Live now holds 29 events and 1 GPX file. The run
+was a dry run first, then `--confirm`, with the real account passed as `--protect`.
+
 ## Running the tests
 
 ```bash
@@ -150,6 +158,7 @@ the security rules entirely.
 | `scripts/reconcile-event-counts.js` | Sets each user's `eventCount` to the events they actually own. |
 | `scripts/backfill-owned-event-counts.js` | Sets `ownedEventCount` for every existing user, once, after the function is deployed. |
 | `scripts/export-users.js` | Email/name export of registered users. Output is personal data — gitignored. |
+| `scripts/delete-users.js` | Deletes users outright: their events (GPX first, then every subcollection), their access on other events, `users`/`userDirectory`, RevenueCat customer (`--rc-key-file`) and Auth user. `--event`, `--orphan-access`, `--protect`. Prints who else loses an event before anything goes. |
 
 Debris the audit looks for, and why each exists:
 
