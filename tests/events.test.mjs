@@ -115,42 +115,63 @@ describe('/events/{eventId}', () => {
     await assertFails(setDoc(doc(alice, 'events/evt-new'), eventDoc('bob')));
   });
 
+  // The free tier reads the server's ownedEventCount (recountOwnedEvents), not the apps'
+  // eventCount (13 Nov 2026: the 1.13 apps stopped writing it; it drifted; users could reset it).
+
   it('lets a free user with no events create one', async () => {
-    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ eventCount: 0 })));
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ ownedEventCount: 0 })));
     const alice = testEnv.authenticatedContext('alice').firestore();
     await assertSucceeds(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
   });
 
-  /// The free tier is one event, and the counter is incremented after a create — so a free
-  /// user holding one event already reads as eventCount == 1 and must be refused. This is
-  /// where the rule used to say `<= 1` and quietly allowed two.
-  it('denies a free user with one event creating a second', async () => {
-    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ eventCount: 1 })));
+  /// `< 1`: a free user who owns one event is refused a second (the rule once said `<= 1`).
+  it('denies a free user who owns one event creating a second', async () => {
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ ownedEventCount: 1 })));
     const alice = testEnv.authenticatedContext('alice').firestore();
     await assertFails(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
   });
 
-  it('matches the app: SubscriptionManager.canCreateEvent is isProUser || eventCount < 1', async () => {
-    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ eventCount: 2 })));
+  it('denies a free user who owns several (a lapsed subscriber)', async () => {
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ ownedEventCount: 3 })));
     const alice = testEnv.authenticatedContext('alice').firestore();
     await assertFails(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
   });
 
-  it('lets a Pro user create regardless of how many events they have', async () => {
-    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ isProUser: true, eventCount: 50 })));
+  it('lets a Pro user create regardless of how many events they own', async () => {
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ isProUser: true, ownedEventCount: 50 })));
     const alice = testEnv.authenticatedContext('alice').firestore();
     await assertSucceeds(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
   });
 
-  /// ⚠️ THE eventCount FIELD IS FRAGILE. `SyncService` maintains it with
-  /// `FieldValue.increment` (SyncService.swift:571/580), but `UserDTO` has no `eventCount`
-  /// property and `FirestoreService.saveUser` writes with `setData(from:)` and no merge — so
-  /// every profile save wipes it back to absent, which this rule reads as 0. A free user can
-  /// reset their own allowance by editing their profile. Pinned here because the rule depends
-  /// on a field the app deletes behind its back.
-  it('treats a missing eventCount as zero', async () => {
-    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc()));   // no eventCount
+  /// The hole this closes: a 1.13 app never writes eventCount, so it stays absent (read as 0)
+  /// however many events the user owns. Under the old rule this create succeeded.
+  it('refuses a free user who owns an event even when eventCount is missing or 0', async () => {
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ ownedEventCount: 1 })));
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
+
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ ownedEventCount: 1, eventCount: 0 })));
+    await assertFails(setDoc(doc(alice, 'events/evt-new2'), eventDoc('alice')));
+  });
+
+  /// A drifted-high eventCount (1.12.x) no longer locks a free user with no events out.
+  it('ignores a stale eventCount', async () => {
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ ownedEventCount: 0, eventCount: 2 })));
     const alice = testEnv.authenticatedContext('alice').firestore();
     await assertSucceeds(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
+  });
+
+  /// A brand-new user has no ownedEventCount until their first event: 0.
+  it('treats a missing ownedEventCount as zero', async () => {
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc()));
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(setDoc(doc(alice, 'events/evt-new'), eventDoc('alice')));
+  });
+
+  /// Nobody can lower their own count to get another free event (the users rule refuses it).
+  it('refuses a user resetting their own ownedEventCount', async () => {
+    await seed(testEnv, (db) => setDoc(doc(db, 'users/alice'), userDoc({ ownedEventCount: 1 })));
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(updateDoc(doc(alice, 'users/alice'), { ownedEventCount: 0 }));
   });
 });

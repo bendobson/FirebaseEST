@@ -335,3 +335,20 @@ Not here: the planner reading the claim (planner repo), the apps (stage 2), stag
 
 A claim reaches a client only when its ID token refreshes (up to an hour, or forced). The
 apps force a refresh after a purchase from stage 2. Until then the doc flag keeps them working.
+
+## Free tier on the server's count (13 Nov 2026)
+
+The event create rule's free-tier limit now reads `users/{uid}.ownedEventCount` (kept by
+`recountOwnedEvents`; no client may write it), not the apps' `eventCount`:
+`isProUser() || ownedEventCount < 1`, a missing count being 0. Why now, ahead of stage 3:
+the 1.13 apps stop writing `eventCount` (Pro migration stage 2), so for their users it stayed
+absent and the old rule let a free user create any number of events. It also drifted (the
+5 Nov reconcile fixed 15 users, 3 of them locked out) and users could reset it themselves.
+
+Nothing reads `eventCount` any more; 1.12.x apps still write it, harmlessly, and stage 3 can
+refuse client writes of it. The count updates a moment after a create, so two creates within
+that moment could both pass: accepted. A deleted account's replacement (a new uid) starts at
+0, by design. Free users can't delete events (Pro), so their events outlive a deleted account
+until the monthly orphan sweep (`firestore-audit.js --delete-orphan-events`).
+Tests: `tests/events.test.mjs` ("Creating, and the free-tier limit"); both mutations (back to
+`eventCount`, and `<= 1`) fail them.
