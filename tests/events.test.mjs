@@ -64,24 +64,19 @@ describe('/events/{eventId}', () => {
     await assertSucceeds(updateDoc(doc(bob, 'events/evt1'), { name: 'Renamed' }));
   });
 
-  /// ⚠️ KNOWN MISMATCH — this test passes, and that is the bug.
-  ///
-  /// The rules compare `userRole(eventId) == "editor"`, lowercase. The iOS app stores the
-  /// role as a *localised display string*: AccessControlView.swift:111 writes
-  /// `L10n.event_access_viewer` and its picker (line 66) offers
-  /// `[event_access_viewer, event_access_editor, event_access_owner]` — so an English user
-  /// writes "Editor" and a German user writes "Bearbeiter". Neither ever equals "editor",
-  /// so in production no editor can write to anything.
-  ///
-  /// Fix on the app side (store a stable lowercase token and localise only for display),
-  /// then delete this test and make the one above the only editor case.
-  it('DOCUMENTS A BUG: the capitalised role the app actually writes is denied', async () => {
+  /// The rules compare `userRole(eventId) == "editor"`, lowercase, and only the token counts.
+  /// Until Aug 2026 the iOS app stored the role as a *localised display string* ("Editor",
+  /// "Bearbeiter"), so no editor could write anything. Fixed app-side (iOS `EventRole`,
+  /// 8777162) and in the data (`scripts/migrate-roles.js`, live 5 Nov 2026). These two pin
+  /// that a non-token role is still refused, so a regression in any client shows up as
+  /// "editor can't edit" rather than as a rule quietly widened to match it. See the README.
+  it('refuses a capitalised role (what old iOS builds wrote)', async () => {
     await seedOwnedEvent({ access: { bob: 'Editor' } });
     const bob = testEnv.authenticatedContext('bob').firestore();
     await assertFails(updateDoc(doc(bob, 'events/evt1'), { name: 'Renamed' }));
   });
 
-  it('DOCUMENTS A BUG: a localised role is denied too', async () => {
+  it('refuses a localised role too', async () => {
     await seedOwnedEvent({ access: { bob: 'Bearbeiter' } });
     const bob = testEnv.authenticatedContext('bob').firestore();
     await assertFails(updateDoc(doc(bob, 'events/evt1'), { name: 'Renamed' }));

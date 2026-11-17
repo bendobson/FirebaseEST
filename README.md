@@ -154,7 +154,7 @@ the security rules entirely.
 | Script | Does |
 |---|---|
 | `scripts/firestore-audit.js` | Reports Auth users, their documents and events, and the three kinds of debris: throwaway guests, orphan events, orphan user documents. Flags for cleaning each. |
-| `scripts/migrate-roles.js` | Rewrites access-document roles as canonical tokens. See "Roles" below. |
+| `scripts/migrate-roles.js` | Rewrites access-document roles as canonical tokens. See "1. Roles" under "Problems these tests found". |
 | `scripts/reconcile-event-counts.js` | Sets each user's `eventCount` to the events they actually own. |
 | `scripts/backfill-owned-event-counts.js` | Sets `ownedEventCount` for every existing user, once, after the function is deployed. |
 | `scripts/export-users.js` | Email/name export of registered users. Output is personal data — gitignored. |
@@ -171,11 +171,21 @@ Debris the audit looks for, and why each exists:
   Only those owning no events are deleted automatically — one that still owns events would
   strand them, so it's reported for manual attention instead.
 
-## Known problems these tests pin
+## Problems these tests found (all three fixed)
 
-Found while writing them. All three are app-side; the rules behave as written.
+Found while writing the tests in August 2026. All three were app-side; the rules behaved as
+written. They're kept here because the reasoning still explains the rules and the scripts.
 
-### 1. Editors cannot edit anything
+| | Fixed by | Data repaired |
+|---|---|---|
+| 1. Roles stored as localised strings | iOS `8777162` (10 Aug 2026): `EventRole` stores a token, localises only for display | `migrate-roles.js` on live, 5 Nov 2026 (6 docs, case only) |
+| 2. Profile saves wiped `eventCount` | iOS `8777162`: `saveUser` merges; Android 1.13.0 merges every write | `reconcile-event-counts.js` on live, 5 Nov 2026 (15 users) |
+| 3. Rules allowed two free events | this repo, `118ef96`: `userEventCount() < 1` | the same reconcile unblocked 3 free users the stricter rule locked out |
+
+The free-tier counter itself is being replaced: stage 1 of the Pro migration (below) adds the
+server-written `ownedEventCount`, and stage 3 makes the rules use it.
+
+### 1. Roles: editors could not edit anything
 
 The rules compare `userRole(eventId) == "editor"`. The iOS app stores the role as a
 **localised display string** — `AccessControlView.swift:111` writes `L10n.event_access_viewer`,
@@ -191,7 +201,7 @@ Note that `SyncService.swift:757` already works around the capitalisation with `
 — that hides the English case but not the localised one. Existing access documents in
 production will need migrating.
 
-### 2. `eventCount` is deleted behind the rules' back
+### 2. `eventCount` was deleted behind the rules' back
 
 `allow create` on an event consults `userDoc().data.eventCount` to enforce the free-tier
 limit. `SyncService.swift:571/580` maintains that field with `FieldValue.increment`, but
@@ -200,7 +210,7 @@ document with `setData(from:)` and no merge — so **every profile save wipes it
 then reads a missing field as zero. A free user can reset their own allowance by editing their
 profile. Fix with a merge write, or by moving the counter out of the user document.
 
-### 3. The rules allow two free events, the app allows one
+### 3. The rules allowed two free events, the app allowed one
 
 `userEventCount() <= 1` permits a create when the user already has one event.
 `SubscriptionManager.canCreateEvent` is `isProUser || eventCount < 1`. The client limit is the
@@ -231,6 +241,16 @@ one users meet; the server limit is the only one an attacker has to beat. Pick o
   The emulators never check this, so `tests/storage.test.mjs` passes whether or not the grant
   exists. No test in this repo can catch its absence. If GPX suddenly stops working across the
   board, check the grant before reading the rules, and re-grant it on any new project.
+- **Deleting an event can orphan its GPX file for good.** Every rule in `storage.rules` starts
+  with `eventExists(eventId)`, so once `events/{id}` is gone nobody, the owner included, can
+  read or delete `gpx/{id}.gpx`; only the Admin SDK can. Both apps now delete the GPX first and
+  the event document only after (iOS 1.12.1, Android 1.13.0 `EventRepository.deleteEvent`), but
+  a delete made offline or interrupted halfway still strands the file. **The bucket sweep is
+  not written yet:** `firestore-audit.js` doesn't list `gpx/`, although Android's code comment
+  says it does. The plan: list `gpx/`, strip `.gpx` to get the event id, report objects whose
+  event is missing, delete only with `--confirm`. Notion Bug Tracker: "Deleting an event
+  orphans its GPX file in Storage forever". Every storage test seeds a live event first, so
+  none of them can see this.
 - `match /events { allow list: if isSignedIn(); }` (firestore.rules:94) looks inert —
   Firestore evaluates rules against document paths, and the per-document
   `match /events/{eventId}` block below already grants `list` behind `canReadCurrentEvent()`.
@@ -249,14 +269,19 @@ users/{uid}                                  profile; uid == Firebase Auth uid
 events/{eventId}                             ownerUserId is the authority for ownership
 events/{eventId}/access/{uid}                id field == uid (the collection-group query needs it)
 events/{eventId}/checkpoints/{detailId}
-events/{eventId}/paces/{paceId}
+events/{eventId}/paces/{paceId}                 paces/default (1.13.0 contract)
+events/{eventId}/crew/{crewId}                  names only; id field == crewId; Pro owner/editor writes
 ```
 
-Distances are canonical **metres** and paces **seconds per kilometre** as of schema v2; the
-legacy display-unit fields are still written alongside them until Android ships its own v2
-update. See the iOS repo's `CLAUDE.md` for the full migration story.
+Distances are canonical **metres** and paces **seconds per kilometre** as of schema v2 (iOS
+and Android both ported, July 2026). Both apps still dual-write the legacy display-unit fields
+alongside them, so a phone on an older version keeps working off the old keys.
 
-## Pro migration, stage 1 (drafted 3 Nov 2026; on est-develop since 4 Nov, not live)
+The 1.13.0 wire contract (Timestamps for dates, merge saves, upper-case ids, notes in
+`additionalNotesRTF`, `ownerUserId` fixed after create) is the web planner's codec; the Android
+repo's `CLAUDE.md` summarises it. See the iOS repo's `CLAUDE.md` for the full migration story.
+
+## Pro migration, stage 1 (live: est-develop 4 Nov 2026, eventtracker-a150e 5 Nov 2026)
 
 Notion: "Move Pro status and event count server-side, and add App Check". Today any signed-in
 user can write their own `isProUser` and `eventCount`, and the rules trust both. Stage 1 adds
